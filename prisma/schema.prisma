@@ -1,0 +1,292 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── USUARIOS ────────────────────────────────────────────────────────────────
+
+model User {
+  id          Int           @id @default(autoincrement())
+  name        String
+  email       String        @unique
+  password    String
+  role        Role          @default(USER)
+  phone       String?
+  avatarUrl   String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  orders        Order[]
+  cart          Cart?
+  waitingList   WaitingList[]
+  reviews       Review[]
+  refreshTokens RefreshToken[]
+}
+
+// ─── VENUES Y SECCIONES ──────────────────────────────────────────────────────
+
+model Venue {
+  id        Int       @id @default(autoincrement())
+  name      String
+  address   String
+  city      String
+  country   String    @default("Colombia")
+  latitude  Float?
+  longitude Float?
+  imageUrl  String?
+
+  sections  Section[]
+  events    Event[]
+}
+
+// Zonas físicas dentro de un venue (VIP, General, Tribuna Norte, etc.)
+model Section {
+  id          Int          @id @default(autoincrement())
+  name        String
+  venueId     Int
+  capacity    Int
+  description String?
+
+  venue       Venue        @relation(fields: [venueId], references: [id])
+  ticketTypes TicketType[]
+}
+
+// ─── CATEGORÍAS Y ARTISTAS ───────────────────────────────────────────────────
+
+model Category {
+  id     Int     @id @default(autoincrement())
+  name   String  @unique
+  slug   String  @unique
+  icon   String?
+
+  events Event[]
+}
+
+model Artist {
+  id       Int           @id @default(autoincrement())
+  name     String
+  bio      String?
+  imageUrl String?
+  genre    String?
+
+  events   EventArtist[]
+}
+
+// ─── EVENTOS ─────────────────────────────────────────────────────────────────
+
+model Event {
+  id          Int           @id @default(autoincrement())
+  name        String
+  description String?
+  date        DateTime
+  endDate     DateTime?
+  imageUrl    String?
+  bannerUrl   String?
+  status      EventStatus   @default(PUBLISHED)
+  venueId     Int
+  categoryId  Int
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  venue       Venue         @relation(fields: [venueId], references: [id])
+  category    Category      @relation(fields: [categoryId], references: [id])
+  artists     EventArtist[]
+  ticketTypes TicketType[]
+  reviews     Review[]
+
+  @@index([date])
+  @@index([categoryId])
+  @@index([venueId])
+  @@index([status])
+}
+
+// Tabla pivot Evento <-> Artista
+model EventArtist {
+  eventId   Int
+  artistId  Int
+  headliner Boolean @default(false)
+  order     Int     @default(0)
+
+  event     Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  artist    Artist  @relation(fields: [artistId], references: [id])
+
+  @@id([eventId, artistId])
+}
+
+// ─── TIPOS DE BOLETA (zonas/categorías de precio por evento) ─────────────────
+// Ejemplo: "VIP Floor $650.000", "Tribuna General $180.000"
+
+model TicketType {
+  id                Int           @id @default(autoincrement())
+  eventId           Int
+  sectionId         Int?
+  name              String
+  description       String?
+  price             Float
+  totalQuantity     Int
+  availableQuantity Int
+  maxPerOrder       Int           @default(4)
+
+  event             Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  section           Section?      @relation(fields: [sectionId], references: [id])
+  tickets           Ticket[]
+  orderItems        OrderItem[]
+  cartItems         CartItem[]
+  waitingList       WaitingList[]
+
+  @@index([eventId])
+}
+
+// ─── BOLETAS INDIVIDUALES ─────────────────────────────────────────────────────
+// Cada fila = una boleta física/digital con QR único
+
+model Ticket {
+  id           Int          @id @default(autoincrement())
+  ticketTypeId Int
+  orderId      Int?
+  status       TicketStatus @default(AVAILABLE)
+  seatNumber   String?
+  qrCode       String       @unique
+  createdAt    DateTime     @default(now())
+
+  ticketType   TicketType   @relation(fields: [ticketTypeId], references: [id])
+  order        Order?       @relation(fields: [orderId], references: [id])
+
+  @@index([ticketTypeId, status])
+  @@index([orderId])
+}
+
+// ─── ÓRDENES DE COMPRA ────────────────────────────────────────────────────────
+
+model Order {
+  id          Int         @id @default(autoincrement())
+  userId      Int
+  status      OrderStatus @default(PENDING)
+  totalAmount Float
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  user        User        @relation(fields: [userId], references: [id])
+  items       OrderItem[]
+  tickets     Ticket[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+// Líneas de la orden (qué tipos de boleta y cuántas)
+model OrderItem {
+  id           Int        @id @default(autoincrement())
+  orderId      Int
+  ticketTypeId Int
+  quantity     Int
+  unitPrice    Float
+
+  order        Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticketType   TicketType @relation(fields: [ticketTypeId], references: [id])
+}
+
+// ─── CARRITO TEMPORAL (expira en 15 min) ─────────────────────────────────────
+
+model Cart {
+  id        Int        @id @default(autoincrement())
+  userId    Int        @unique
+  expiresAt DateTime
+  createdAt DateTime   @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+}
+
+model CartItem {
+  id           Int        @id @default(autoincrement())
+  cartId       Int
+  ticketTypeId Int
+  quantity     Int
+
+  cart         Cart       @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  ticketType   TicketType @relation(fields: [ticketTypeId], references: [id])
+
+  @@unique([cartId, ticketTypeId])
+}
+
+// ─── LISTA DE ESPERA ──────────────────────────────────────────────────────────
+
+model WaitingList {
+  id           Int        @id @default(autoincrement())
+  userId       Int
+  ticketTypeId Int
+  quantity     Int        @default(1)
+  position     Int
+  createdAt    DateTime   @default(now())
+
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticketType   TicketType @relation(fields: [ticketTypeId], references: [id])
+
+  @@unique([userId, ticketTypeId])
+  @@index([ticketTypeId, position])
+}
+
+// ─── REFRESH TOKENS ──────────────────────────────────────────────────────────
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  userId    Int
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── RESEÑAS ──────────────────────────────────────────────────────────────────
+
+model Review {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  eventId   Int
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+  @@index([eventId])
+}
+
+// ─── ENUMS ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  SOLD_OUT
+  CANCELLED
+  COMPLETED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  REFUNDED
+}
+
+enum TicketStatus {
+  AVAILABLE
+  RESERVED
+  SOLD
+  CANCELLED
+}
