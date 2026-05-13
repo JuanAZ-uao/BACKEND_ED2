@@ -44,6 +44,7 @@ async function clearDatabase() {
   await prisma.artist.deleteMany({});
   await prisma.section.deleteMany({});
   await prisma.venue.deleteMany({});
+  await prisma.notification.deleteMany({});
   await prisma.notificationPreference.deleteMany({});
   await prisma.paymentMethod.deleteMany({});
   await prisma.refreshToken.deleteMany({});

@@ -27,4 +27,38 @@ const cancel = async (req, res, next) => {
   }
 };
 
-module.exports = { getByConcert, reserve, cancel };
+const verifyByCode = async (req, res, next) => {
+  try {
+    const prisma = require('../config/prisma');
+    const ticket = await prisma.ticket.findUnique({
+      where: { ticketCode: req.params.code },
+      include: {
+        user: { select: { firstName: true, lastName: true, city: true } },
+        ticketType: {
+          include: {
+            concert: { include: { artist: true, venue: true } },
+            section: true,
+          },
+        },
+        order: { select: { id: true, createdAt: true, totalAmount: true } },
+      },
+    });
+    if (!ticket) throw { status: 404, message: 'Boleta no encontrada' };
+    res.json(ticket);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getSeatMap = async (req, res, next) => {
+  try {
+    const { ticketTypeId } = req.query;
+    if (!ticketTypeId) throw { status: 400, message: 'ticketTypeId requerido' };
+    const seats = await ticketService.getSeatMap(Number(ticketTypeId));
+    res.json(seats);
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { getByConcert, reserve, cancel, verifyByCode, getSeatMap };

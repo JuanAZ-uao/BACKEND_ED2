@@ -1,5 +1,7 @@
+const bcrypt = require('bcryptjs');
 const prisma = require('../config/prisma');
 const { excludePassword } = require('../utils/helpers');
+const notificationService = require('../services/notification.service');
 
 const getProfile = async (req, res, next) => {
   try {
@@ -147,6 +149,33 @@ const getAll = async (req, res, next) => {
   }
 };
 
+const changePassword = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return next({ status: 400, message: 'Contraseña actual y nueva son obligatorias' });
+    }
+    if (newPassword.length < 6) {
+      return next({ status: 400, message: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    const valid = await bcrypt.compare(currentPassword, user.password);
+    if (!valid) return next({ status: 400, message: 'La contraseña actual es incorrecta' });
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({ where: { id: req.user.id }, data: { password: hashed } });
+    notificationService.create({
+      userId: req.user.id,
+      type: 'SECURITY',
+      title: 'Contraseña actualizada',
+      message: 'Tu contraseña fue cambiada exitosamente. Si no fuiste tú, contacta soporte.',
+      link: '/profile',
+    }).catch(() => {});
+    res.json({ message: 'Contraseña actualizada correctamente' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getProfile,
   updateProfile,
@@ -156,5 +185,6 @@ module.exports = {
   deletePaymentMethod,
   getNotifications,
   updateNotifications,
+  changePassword,
   getAll,
 };

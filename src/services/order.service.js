@@ -1,5 +1,7 @@
 const prisma = require('../config/prisma');
 const MinHeap = require('../data-structures/MinHeap');
+const notificationService = require('./notification.service');
+const { sendSMS } = require('./sms.service');
 
 const SERVICE_FEE_RATE = 0.10; // 10% cargos de servicio
 const INSURANCE_RATE = 0.03;   // 3% seguros
@@ -113,6 +115,37 @@ const create = async ({ items, paymentMethod = 'CARD' }, userId) => {
   await prisma.ticket.updateMany({
     where: { id: { in: allTicketIds } },
     data: { status: 'SOLD', userId },
+  });
+
+  // Notificación en bandeja + SMS (no bloquean la respuesta)
+  Promise.resolve().then(async () => {
+    try {
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      const firstItem = order.items[0];
+      const concert = firstItem?.ticketType?.concert;
+      const artist = concert?.artist;
+      if (!user || !concert || !artist) return;
+
+      const totalTickets = order.items.reduce((sum, item) => sum + item.quantity, 0);
+      const title = 'Compra confirmada';
+      const message = `Compraste ${totalTickets} boleta${totalTickets > 1 ? 's' : ''} para ${artist.name} - ${concert.tourName}`;
+
+      await notificationService.create({
+        userId,
+        type: 'PURCHASE',
+        title,
+        message,
+        link: '/tickets',
+      });
+
+      if (user.phone) {
+        const firstCode = order.tickets[0]?.ticketCode ?? '';
+        const smsBody = `Concertix: ${message}. Codigo: ${firstCode}. Total: $${Math.round(totalAmount).toLocaleString('es-CO')}`;
+        sendSMS(user.phone, smsBody).catch(() => {});
+      }
+    } catch (e) {
+      console.error('[Order] notificación fallida:', e.message);
+    }
   });
 
   return order;

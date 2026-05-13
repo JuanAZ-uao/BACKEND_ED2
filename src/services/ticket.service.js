@@ -115,4 +115,25 @@ const getWaitingQueue = (ticketTypeId) => {
     : [];
 };
 
-module.exports = { getByConcert, reserve, cancel, getWaitingQueue };
+const SEAT_STATUS_PRIORITY = { SOLD: 0, USED: 0, RESERVED: 1, AVAILABLE: 2, CANCELLED: 3 };
+
+const getSeatMap = async (ticketTypeId) => {
+  const tickets = await prisma.ticket.findMany({
+    where: { ticketTypeId },
+    select: { seatLabel: true, row: true, status: true },
+    orderBy: [{ row: 'asc' }, { seatLabel: 'asc' }],
+  });
+
+  // Deduplicate by seatLabel — keep the most restrictive status (SOLD beats AVAILABLE)
+  const seen = new Map();
+  for (const t of tickets) {
+    if (!t.seatLabel) continue;
+    const existing = seen.get(t.seatLabel);
+    if (!existing || (SEAT_STATUS_PRIORITY[t.status] ?? 99) < (SEAT_STATUS_PRIORITY[existing.status] ?? 99)) {
+      seen.set(t.seatLabel, t);
+    }
+  }
+  return Array.from(seen.values());
+};
+
+module.exports = { getByConcert, reserve, cancel, getWaitingQueue, getSeatMap };

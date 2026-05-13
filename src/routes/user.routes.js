@@ -13,6 +13,7 @@ router.post('/me/payment-methods', authMiddleware, userController.addPaymentMeth
 router.delete('/me/payment-methods/:id', authMiddleware, userController.deletePaymentMethod);
 router.get('/me/notifications', authMiddleware, userController.getNotifications);
 router.put('/me/notifications', authMiddleware, userController.updateNotifications);
+router.put('/me/password', authMiddleware, userController.changePassword);
 router.get('/', authMiddleware, roleMiddleware('ADMIN'), userController.getAll);
 
 module.exports = router;

@@ -34,6 +34,7 @@ model User {
   paymentMethods     PaymentMethod[]
   notificationPrefs  NotificationPreference?
   tickets            Ticket[]
+  notifications      Notification[]
 }
 
 // ─── VENUES Y SECCIONES ──────────────────────────────────────────────────────
@@ -277,6 +278,24 @@ model NotificationPreference {
   smsSecurityAlerts    Boolean @default(true)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── NOTIFICACIONES DE BANDEJA ───────────────────────────────────────────────
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  type      String   // PURCHASE | DISCOUNT | REMINDER | SECURITY | INFO
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
 }
 
 // ─── REFRESH TOKENS ──────────────────────────────────────────────────────────

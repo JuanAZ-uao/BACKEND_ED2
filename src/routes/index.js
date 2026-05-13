@@ -5,6 +5,7 @@ const ticketRoutes = require('./ticket.routes');
 const orderRoutes = require('./order.routes');
 const userRoutes = require('./user.routes');
 const cartRoutes = require('./cart.routes');
+const notificationRoutes = require('./notification.routes');
 
 const router = Router();
 
@@ -14,5 +15,6 @@ router.use('/tickets', ticketRoutes);
 router.use('/orders', orderRoutes);
 router.use('/users', userRoutes);
 router.use('/cart', cartRoutes);
+router.use('/notifications', notificationRoutes);
 
 module.exports = router;
