@@ -10,175 +10,171 @@ datasource db {
 // ─── USUARIOS ────────────────────────────────────────────────────────────────
 
 model User {
-  id          Int           @id @default(autoincrement())
-  name        String
-  email       String        @unique
-  password    String
-  role        Role          @default(USER)
-  phone       String?
-  avatarUrl   String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id        Int       @id @default(autoincrement())
+  firstName String
+  lastName  String
+  email     String    @unique
+  password  String
+  role      Role      @default(USER)
+  phone     String?
+  birthDate DateTime?
+  gender    String?
+  city      String?
+  document  String?
+  bio       String?
+  avatarUrl String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
-  orders        Order[]
-  cart          Cart?
-  waitingList   WaitingList[]
-  reviews       Review[]
-  refreshTokens RefreshToken[]
+  orders             Order[]
+  cart               Cart?
+  waitingList        WaitingList[]
+  reviews            Review[]
+  refreshTokens      RefreshToken[]
+  paymentMethods     PaymentMethod[]
+  notificationPrefs  NotificationPreference?
+  tickets            Ticket[]
 }
 
 // ─── VENUES Y SECCIONES ──────────────────────────────────────────────────────
 
 model Venue {
-  id        Int       @id @default(autoincrement())
-  name      String
-  address   String
-  city      String
-  country   String    @default("Colombia")
-  latitude  Float?
-  longitude Float?
-  imageUrl  String?
+  id       Int       @id @default(autoincrement())
+  name     String
+  address  String
+  city     String
+  country  String    @default("Colombia")
+  imageUrl String?
 
-  sections  Section[]
-  events    Event[]
+  sections Section[]
+  concerts Concert[]
 }
 
-// Zonas físicas dentro de un venue (VIP, General, Tribuna Norte, etc.)
 model Section {
   id          Int          @id @default(autoincrement())
   name        String
   venueId     Int
   capacity    Int
   description String?
+  color       String?
 
   venue       Venue        @relation(fields: [venueId], references: [id])
   ticketTypes TicketType[]
 }
 
-// ─── CATEGORÍAS Y ARTISTAS ───────────────────────────────────────────────────
-
-model Category {
-  id     Int     @id @default(autoincrement())
-  name   String  @unique
-  slug   String  @unique
-  icon   String?
-
-  events Event[]
-}
+// ─── ARTISTAS ────────────────────────────────────────────────────────────────
 
 model Artist {
-  id       Int           @id @default(autoincrement())
+  id       Int      @id @default(autoincrement())
   name     String
   bio      String?
   imageUrl String?
-  genre    String?
+  genres   String[]
 
-  events   EventArtist[]
+  concerts Concert[]
 }
 
-// ─── EVENTOS ─────────────────────────────────────────────────────────────────
+// ─── CONCIERTOS ──────────────────────────────────────────────────────────────
 
-model Event {
+model Concert {
   id          Int           @id @default(autoincrement())
-  name        String
+  artistId    Int
+  tourName    String
   description String?
   date        DateTime
+  doorsOpenAt DateTime?
   endDate     DateTime?
+  venueId     Int
   imageUrl    String?
   bannerUrl   String?
-  status      EventStatus   @default(PUBLISHED)
-  venueId     Int
-  categoryId  Int
+  status      ConcertStatus @default(PUBLISHED)
+  isFeatured  Boolean       @default(false)
+  genres      String[]
+  viewerCount Int           @default(0)
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
+  artist      Artist        @relation(fields: [artistId], references: [id])
   venue       Venue         @relation(fields: [venueId], references: [id])
-  category    Category      @relation(fields: [categoryId], references: [id])
-  artists     EventArtist[]
   ticketTypes TicketType[]
   reviews     Review[]
+  waitingList WaitingList[]
 
   @@index([date])
-  @@index([categoryId])
+  @@index([artistId])
   @@index([venueId])
   @@index([status])
 }
 
-// Tabla pivot Evento <-> Artista
-model EventArtist {
-  eventId   Int
-  artistId  Int
-  headliner Boolean @default(false)
-  order     Int     @default(0)
-
-  event     Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  artist    Artist  @relation(fields: [artistId], references: [id])
-
-  @@id([eventId, artistId])
-}
-
-// ─── TIPOS DE BOLETA (zonas/categorías de precio por evento) ─────────────────
-// Ejemplo: "VIP Floor $650.000", "Tribuna General $180.000"
+// ─── TIPOS DE BOLETA ─────────────────────────────────────────────────────────
 
 model TicketType {
   id                Int           @id @default(autoincrement())
-  eventId           Int
+  concertId         Int
   sectionId         Int?
   name              String
   description       String?
   price             Float
   totalQuantity     Int
   availableQuantity Int
-  maxPerOrder       Int           @default(4)
+  maxPerOrder       Int           @default(8)
 
-  event             Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  section           Section?      @relation(fields: [sectionId], references: [id])
-  tickets           Ticket[]
-  orderItems        OrderItem[]
-  cartItems         CartItem[]
-  waitingList       WaitingList[]
+  concert     Concert      @relation(fields: [concertId], references: [id], onDelete: Cascade)
+  section     Section?     @relation(fields: [sectionId], references: [id])
+  tickets     Ticket[]
+  orderItems  OrderItem[]
+  cartItems   CartItem[]
+  waitingList WaitingList[]
 
-  @@index([eventId])
+  @@index([concertId])
 }
 
 // ─── BOLETAS INDIVIDUALES ─────────────────────────────────────────────────────
-// Cada fila = una boleta física/digital con QR único
 
 model Ticket {
   id           Int          @id @default(autoincrement())
   ticketTypeId Int
   orderId      Int?
-  status       TicketStatus @default(AVAILABLE)
-  seatNumber   String?
+  userId       Int?
+  row          String?
+  seatLabel    String?
+  ticketCode   String       @unique
   qrCode       String       @unique
+  status       TicketStatus @default(AVAILABLE)
+  usedAt       DateTime?
   createdAt    DateTime     @default(now())
 
-  ticketType   TicketType   @relation(fields: [ticketTypeId], references: [id])
-  order        Order?       @relation(fields: [orderId], references: [id])
+  ticketType TicketType @relation(fields: [ticketTypeId], references: [id])
+  order      Order?     @relation(fields: [orderId], references: [id])
+  user       User?      @relation(fields: [userId], references: [id])
 
   @@index([ticketTypeId, status])
   @@index([orderId])
+  @@index([userId])
 }
 
 // ─── ÓRDENES DE COMPRA ────────────────────────────────────────────────────────
 
 model Order {
-  id          Int         @id @default(autoincrement())
-  userId      Int
-  status      OrderStatus @default(PENDING)
-  totalAmount Float
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id            Int         @id @default(autoincrement())
+  userId        Int
+  status        OrderStatus @default(PENDING)
+  subtotal      Float
+  serviceFee    Float       @default(0)
+  insurance     Float       @default(0)
+  totalAmount   Float
+  paymentMethod String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
-  user        User        @relation(fields: [userId], references: [id])
-  items       OrderItem[]
-  tickets     Ticket[]
+  user    User        @relation(fields: [userId], references: [id])
+  items   OrderItem[]
+  tickets Ticket[]
 
   @@index([userId])
   @@index([status])
 }
 
-// Líneas de la orden (qué tipos de boleta y cuántas)
 model OrderItem {
   id           Int        @id @default(autoincrement())
   orderId      Int
@@ -186,20 +182,21 @@ model OrderItem {
   quantity     Int
   unitPrice    Float
 
-  order        Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  ticketType   TicketType @relation(fields: [ticketTypeId], references: [id])
+  order      Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticketType TicketType @relation(fields: [ticketTypeId], references: [id])
 }
 
-// ─── CARRITO TEMPORAL (expira en 15 min) ─────────────────────────────────────
+// ─── CARRITO TEMPORAL ─────────────────────────────────────────────────────────
 
 model Cart {
   id        Int        @id @default(autoincrement())
   userId    Int        @unique
   expiresAt DateTime
   createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items     CartItem[]
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
 }
 
 model CartItem {
@@ -208,8 +205,8 @@ model CartItem {
   ticketTypeId Int
   quantity     Int
 
-  cart         Cart       @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  ticketType   TicketType @relation(fields: [ticketTypeId], references: [id])
+  cart       Cart       @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  ticketType TicketType @relation(fields: [ticketTypeId], references: [id])
 
   @@unique([cartId, ticketTypeId])
 }
@@ -217,18 +214,69 @@ model CartItem {
 // ─── LISTA DE ESPERA ──────────────────────────────────────────────────────────
 
 model WaitingList {
-  id           Int        @id @default(autoincrement())
+  id           Int      @id @default(autoincrement())
   userId       Int
+  concertId    Int
   ticketTypeId Int
-  quantity     Int        @default(1)
+  quantity     Int      @default(1)
   position     Int
-  createdAt    DateTime   @default(now())
+  createdAt    DateTime @default(now())
 
-  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ticketType   TicketType @relation(fields: [ticketTypeId], references: [id])
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  concert    Concert    @relation(fields: [concertId], references: [id], onDelete: Cascade)
+  ticketType TicketType @relation(fields: [ticketTypeId], references: [id])
 
   @@unique([userId, ticketTypeId])
   @@index([ticketTypeId, position])
+}
+
+// ─── RESEÑAS ──────────────────────────────────────────────────────────────────
+
+model Review {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  concertId Int
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  concert Concert @relation(fields: [concertId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, concertId])
+  @@index([concertId])
+}
+
+// ─── MÉTODOS DE PAGO ──────────────────────────────────────────────────────────
+
+model PaymentMethod {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  lastFour    String
+  brand       String
+  expiryMonth Int
+  expiryYear  Int
+  isPrimary   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── PREFERENCIAS DE NOTIFICACIÓN ────────────────────────────────────────────
+
+model NotificationPreference {
+  id                   Int     @id @default(autoincrement())
+  userId               Int     @unique
+  emailConcertsNearby  Boolean @default(true)
+  emailPurchaseConfirm Boolean @default(true)
+  emailEventReminders  Boolean @default(true)
+  emailOffers          Boolean @default(false)
+  pushTicketUpdates    Boolean @default(true)
+  pushPriceAlerts      Boolean @default(false)
+  smsPurchaseConfirm   Boolean @default(true)
+  smsSecurityAlerts    Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // ─── REFRESH TOKENS ──────────────────────────────────────────────────────────
@@ -240,26 +288,9 @@ model RefreshToken {
   expiresAt DateTime
   createdAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-}
-
-// ─── RESEÑAS ──────────────────────────────────────────────────────────────────
-
-model Review {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  eventId   Int
-  rating    Int
-  comment   String?
-  createdAt DateTime @default(now())
-
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, eventId])
-  @@index([eventId])
 }
 
 // ─── ENUMS ────────────────────────────────────────────────────────────────────
@@ -269,9 +300,10 @@ enum Role {
   ADMIN
 }
 
-enum EventStatus {
+enum ConcertStatus {
   DRAFT
   PUBLISHED
+  LIVE
   SOLD_OUT
   CANCELLED
   COMPLETED
@@ -288,5 +320,6 @@ enum TicketStatus {
   AVAILABLE
   RESERVED
   SOLD
+  USED
   CANCELLED
 }

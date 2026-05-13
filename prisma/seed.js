@@ -3,13 +3,31 @@ const bcrypt = require('bcryptjs');
 
 const prisma = new PrismaClient();
 
-// Genera N boletas individuales con QR únicos para un TicketType
+let ticketCounter = 1;
+
 async function createTickets(ticketTypeId, quantity, prefix) {
-  const tickets = Array.from({ length: quantity }, (_, i) => ({
-    ticketTypeId,
-    status: 'AVAILABLE',
-    qrCode: `${prefix}-${ticketTypeId}-${String(i + 1).padStart(5, '0')}`,
-  }));
+  const rows = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const seatsPerRow = 14;
+  const tickets = [];
+
+  for (let i = 0; i < quantity; i++) {
+    const rowIndex = Math.floor(i / seatsPerRow);
+    const seatNum = (i % seatsPerRow) + 1;
+    const row = rows[rowIndex % 26];
+    const seatLabel = `${row}-${String(seatNum).padStart(2, '0')}`;
+    const code = String(ticketCounter).padStart(5, '0');
+
+    tickets.push({
+      ticketTypeId,
+      status: 'AVAILABLE',
+      row,
+      seatLabel,
+      ticketCode: `CON-2026-${code}`,
+      qrCode: `QR-${prefix}-${code}`,
+    });
+    ticketCounter++;
+  }
+
   await prisma.ticket.createMany({ data: tickets });
 }
 
@@ -22,12 +40,13 @@ async function clearDatabase() {
   await prisma.orderItem.deleteMany({});
   await prisma.order.deleteMany({});
   await prisma.ticketType.deleteMany({});
-  await prisma.eventArtist.deleteMany({});
-  await prisma.event.deleteMany({});
+  await prisma.concert.deleteMany({});
   await prisma.artist.deleteMany({});
   await prisma.section.deleteMany({});
   await prisma.venue.deleteMany({});
-  await prisma.category.deleteMany({});
+  await prisma.notificationPreference.deleteMany({});
+  await prisma.paymentMethod.deleteMany({});
+  await prisma.refreshToken.deleteMany({});
   await prisma.user.deleteMany({});
   console.log('Base de datos limpia.');
 }
@@ -36,74 +55,111 @@ async function main() {
   await clearDatabase();
 
   // ── USUARIOS ──────────────────────────────────────────────────────────────
-  const [adminPass, carlosPass, mariaPass, pedroPass] = await Promise.all([
+  const [adminPass, samuelPass, mariaPass, pedroPass] = await Promise.all([
     bcrypt.hash('admin123', 10),
-    bcrypt.hash('carlos123', 10),
+    bcrypt.hash('samuel123', 10),
     bcrypt.hash('maria123', 10),
     bcrypt.hash('pedro123', 10),
   ]);
 
   await prisma.user.create({
-    data: { name: 'Administrador', email: 'admin@ticketmaster.com', password: adminPass, role: 'ADMIN', phone: '3001234567' },
+    data: {
+      firstName: 'Admin',
+      lastName: 'Concertix',
+      email: 'admin@concertix.com',
+      password: adminPass,
+      role: 'ADMIN',
+      phone: '3001234567',
+      city: 'Bogotá',
+    },
   });
 
-  const carlos = await prisma.user.create({
-    data: { name: 'Carlos Pérez', email: 'carlos@ejemplo.com', password: carlosPass, phone: '3109876543' },
+  const samuel = await prisma.user.create({
+    data: {
+      firstName: 'Samuel',
+      lastName: 'Rios',
+      email: 'samuel@ejemplo.com',
+      password: samuelPass,
+      phone: '3109876543',
+      birthDate: new Date('1999-05-15'),
+      gender: 'Masculino',
+      city: 'Cali, Valle del Cauca',
+      document: '1234567890',
+    },
   });
 
   const maria = await prisma.user.create({
-    data: { name: 'María González', email: 'maria@ejemplo.com', password: mariaPass, phone: '3205551234' },
+    data: {
+      firstName: 'María',
+      lastName: 'González',
+      email: 'maria@ejemplo.com',
+      password: mariaPass,
+      phone: '3205551234',
+      birthDate: new Date('1995-08-22'),
+      gender: 'Femenino',
+      city: 'Bogotá, Cundinamarca',
+    },
   });
 
   const pedro = await prisma.user.create({
-    data: { name: 'Pedro Ramírez', email: 'pedro@ejemplo.com', password: pedroPass, phone: '3118889900' },
+    data: {
+      firstName: 'Pedro',
+      lastName: 'Ramírez',
+      email: 'pedro@ejemplo.com',
+      password: pedroPass,
+      phone: '3118889900',
+      city: 'Medellín, Antioquia',
+    },
   });
 
   console.log('✓ Usuarios creados');
 
-  // ── CATEGORÍAS ────────────────────────────────────────────────────────────
-  const [catConciertos, catDeportes, catTeatro] = await Promise.all([
-    prisma.category.create({ data: { name: 'Conciertos', slug: 'conciertos', icon: '🎵' } }),
-    prisma.category.create({ data: { name: 'Deportes', slug: 'deportes', icon: '⚽' } }),
-    prisma.category.create({ data: { name: 'Teatro y Cultura', slug: 'teatro', icon: '🎭' } }),
-    prisma.category.create({ data: { name: 'Festivales', slug: 'festivales', icon: '🎪' } }),
-  ]);
+  // ── MÉTODOS DE PAGO ────────────────────────────────────────────────────────
+  await prisma.paymentMethod.createMany({
+    data: [
+      { userId: samuel.id, lastFour: '4242', brand: 'VISA', expiryMonth: 8, expiryYear: 2027, isPrimary: false },
+      { userId: samuel.id, lastFour: '8080', brand: 'MASTERCARD', expiryMonth: 3, expiryYear: 2028, isPrimary: true },
+    ],
+  });
 
-  console.log('✓ Categorías creadas');
+  // ── PREFERENCIAS DE NOTIFICACIÓN ──────────────────────────────────────────
+  await prisma.notificationPreference.createMany({
+    data: [
+      { userId: samuel.id },
+      { userId: maria.id },
+    ],
+  });
+
+  console.log('✓ Métodos de pago y notificaciones creadas');
 
   // ── VENUES + SECCIONES ────────────────────────────────────────────────────
-  const movArena = await prisma.venue.create({
+  const elCampin = await prisma.venue.create({
     data: {
-      name: 'Movistar Arena',
-      address: 'Cra 24 # 6-00',
+      name: 'Estadio El Campín',
+      address: 'Cra 30 # 57-60',
       city: 'Bogotá',
-      latitude: 4.6247,
-      longitude: -74.0906,
       sections: {
         create: [
-          { name: 'Golden Ring', capacity: 200, description: 'Zona VIP frente al escenario con open bar' },
-          { name: 'Floor General', capacity: 3000, description: 'Zona de pie con vista directa al escenario' },
-          { name: 'Tribuna Norte', capacity: 2500, description: 'Sillas numeradas vista lateral norte' },
-          { name: 'Tribuna Sur', capacity: 2500, description: 'Sillas numeradas vista lateral sur' },
+          { name: 'Palco Premium', capacity: 300, description: 'Zona exclusiva con mejor vista al escenario', color: '#8B5CF6' },
+          { name: 'VIP Floor', capacity: 1500, description: 'Zona VIP de pie frente al escenario', color: '#3B82F6' },
+          { name: 'General Piso', capacity: 8000, description: 'Zona general en el campo', color: '#10B981' },
+          { name: 'General Lateral', capacity: 6000, description: 'Tribunas laterales numeradas', color: '#10B981' },
         ],
       },
     },
     include: { sections: true },
   });
 
-  const elCampin = await prisma.venue.create({
+  const movArena = await prisma.venue.create({
     data: {
-      name: 'Estadio El Campín',
-      address: 'Cra 30 # 57-60',
+      name: 'Movistar Arena',
+      address: 'Cra 24 # 6-00',
       city: 'Bogotá',
-      latitude: 4.6455,
-      longitude: -74.0774,
       sections: {
         create: [
-          { name: 'Palco Piso', capacity: 500, description: 'Campo VIP con vista privilegiada al escenario' },
-          { name: 'Occidental Baja', capacity: 8000, description: 'Tribuna occidental inferior numerada' },
-          { name: 'Occidental Alta', capacity: 10000, description: 'Tribuna occidental superior numerada' },
-          { name: 'Sur General', capacity: 6000, description: 'Tribuna sur popular sin numerar' },
+          { name: 'Palco Premium', capacity: 200, description: 'Palcos VIP con vista privilegiada', color: '#8B5CF6' },
+          { name: 'VIP Floor', capacity: 800, description: 'Zona VIP frente al escenario', color: '#3B82F6' },
+          { name: 'General', capacity: 5000, description: 'Zona general con numeración', color: '#10B981' },
         ],
       },
     },
@@ -115,31 +171,41 @@ async function main() {
       name: 'Estadio Atanasio Girardot',
       address: 'Cra 74 # 48-64',
       city: 'Medellín',
-      latitude: 6.2559,
-      longitude: -75.5913,
       sections: {
         create: [
-          { name: 'VIP Oriental', capacity: 300, description: 'Palco VIP con mejor ángulo al escenario' },
-          { name: 'General Numerada', capacity: 5000, description: 'Sillas numeradas con buena vista' },
-          { name: 'Barra Popular', capacity: 3000, description: 'Zona de pie sin numerar' },
+          { name: 'Palco Premium', capacity: 200, description: 'Palco VIP con mejor ángulo al escenario', color: '#8B5CF6' },
+          { name: 'Pista', capacity: 3000, description: 'Zona de pie en la pista central', color: '#3B82F6' },
+          { name: 'General', capacity: 5000, description: 'Sillas numeradas con buena vista', color: '#10B981' },
         ],
       },
     },
     include: { sections: true },
   });
 
-  const teatroMet = await prisma.venue.create({
+  const coliseoMed = await prisma.venue.create({
     data: {
-      name: 'Teatro Metropolitano',
-      address: 'Calle 41 # 57-30',
+      name: 'Centro de Eventos',
+      address: 'Cra 43 # 18-00',
       city: 'Medellín',
-      latitude: 6.2527,
-      longitude: -75.5683,
       sections: {
         create: [
-          { name: 'Platea Principal', capacity: 600, description: 'Platea en nivel de escenario' },
-          { name: 'Balcón', capacity: 300, description: 'Planta alta con vista panorámica' },
-          { name: 'Palco Lateral', capacity: 100, description: 'Palcos privados laterales' },
+          { name: 'Pista VIP', capacity: 500, description: 'Zona VIP en la pista', color: '#3B82F6' },
+          { name: 'Pista General', capacity: 3000, description: 'Zona de pie general', color: '#10B981' },
+        ],
+      },
+    },
+    include: { sections: true },
+  });
+
+  const pascualGuerrero = await prisma.venue.create({
+    data: {
+      name: 'Estadio Pascual Guerrero',
+      address: 'Calle 5 # 38-00',
+      city: 'Cali',
+      sections: {
+        create: [
+          { name: 'VIP Floor', capacity: 600, description: 'Zona VIP frente al escenario', color: '#3B82F6' },
+          { name: 'General', capacity: 4000, description: 'Zona general numerada', color: '#10B981' },
         ],
       },
     },
@@ -148,481 +214,546 @@ async function main() {
 
   console.log('✓ Venues y secciones creados');
 
-  // Helper para obtener sección por nombre
   const sec = (venue, name) => venue.sections.find((s) => s.name === name);
 
   // ── ARTISTAS ──────────────────────────────────────────────────────────────
-  const [maluma, jbalvin, karolg, carlosVives, fonseca, shakira] = await Promise.all([
-    prisma.artist.create({ data: { name: 'Maluma', genre: 'Reggaeton / Pop urbano', bio: 'Juan Luis Londoño Arias, cantante y compositor colombiano de talla mundial.' } }),
-    prisma.artist.create({ data: { name: 'J Balvin', genre: 'Reggaeton / Urban', bio: 'José Álvaro Osorio Balvín, pionero del reggaeton urbano colombiano.' } }),
-    prisma.artist.create({ data: { name: 'Karol G', genre: 'Reggaeton / Trap', bio: 'Carolina Giraldo Navarro, "La Bichota", reina global del reggaeton.' } }),
-    prisma.artist.create({ data: { name: 'Carlos Vives', genre: 'Vallenato / Pop', bio: 'Cantante y compositor colombiano, embajador del vallenato moderno. Ganador de Grammy.' } }),
-    prisma.artist.create({ data: { name: 'Fonseca', genre: 'Pop / Tropical', bio: 'Santiago Fonseca, cantautor colombiano de pop, vallenato y ritmos tropicales.' } }),
-    prisma.artist.create({ data: { name: 'Shakira', genre: 'Pop / Rock', bio: 'Shakira Isabel Mebarak Ripoll, cantante barranquillera de fama mundial.' } }),
+  const [jbalvin, karolg, maluma, feid, badBunny, shakira] = await Promise.all([
+    prisma.artist.create({
+      data: {
+        name: 'J Balvin',
+        genres: ['Reggaeton', 'Pop', 'Urbano', 'Trap'],
+        bio: 'José Álvaro Osorio Balvín, pionero del reggaeton urbano colombiano con proyección mundial.',
+      },
+    }),
+    prisma.artist.create({
+      data: {
+        name: 'Karol G',
+        genres: ['Reggaeton', 'Trap', 'Pop'],
+        bio: 'Carolina Giraldo Navarro, "La Bichota", reina global del reggaeton y el trap latino.',
+      },
+    }),
+    prisma.artist.create({
+      data: {
+        name: 'Maluma',
+        genres: ['Reggaeton', 'Pop Urbano', 'Trap'],
+        bio: 'Juan Luis Londoño Arias, cantante y compositor colombiano de talla mundial.',
+      },
+    }),
+    prisma.artist.create({
+      data: {
+        name: 'Feid',
+        genres: ['Reggaeton', 'Urbano', 'R&B'],
+        bio: 'Salomón Villada Hoyos, artista colombiano conocido como "El Ferxxo", fusiona reggaeton con R&B.',
+      },
+    }),
+    prisma.artist.create({
+      data: {
+        name: 'Bad Bunny',
+        genres: ['Reggaeton', 'Trap', 'Latin Pop'],
+        bio: 'Benito Antonio Martínez, el artista latino más escuchado del mundo, originario de Puerto Rico.',
+      },
+    }),
+    prisma.artist.create({
+      data: {
+        name: 'Shakira',
+        genres: ['Pop', 'Rock', 'Latin'],
+        bio: 'Shakira Isabel Mebarak Ripoll, cantante barranquillera de fama mundial e ícono global.',
+      },
+    }),
   ]);
 
   console.log('✓ Artistas creados');
 
-  // ── EVENTOS ───────────────────────────────────────────────────────────────
+  // ── CONCIERTOS ────────────────────────────────────────────────────────────
 
-  // EVENTO 1: Maluma - Movistar Arena
-  const event1 = await prisma.event.create({
+  // CONCIERTO 1: J Balvin - Rayo Tour (FEATURED / EN VIVO pronto)
+  const c1 = await prisma.concert.create({
     data: {
-      name: 'Maluma - Noche de Estrellas Tour 2026',
-      description: 'El rey del reggaeton colombiano regresa a Bogotá con su nuevo tour. Prepárate para una noche llena de éxitos, sorpresas y el mejor entretenimiento.',
-      date: new Date('2026-07-20T20:00:00-05:00'),
-      endDate: new Date('2026-07-20T23:30:00-05:00'),
+      artistId: jbalvin.id,
+      tourName: 'Rayo Tour Colombia 2026',
+      description: 'J Balvin regresa a Colombia con su explosivo Rayo Tour 2026. Una noche de reggaeton, música urbana y producción única. El show más esperado del año en el Estadio El Campín.',
+      date: new Date('2026-06-28T20:00:00-05:00'),
+      doorsOpenAt: new Date('2026-06-28T18:00:00-05:00'),
+      endDate: new Date('2026-06-28T23:30:00-05:00'),
       status: 'PUBLISHED',
-      venueId: movArena.id,
-      categoryId: catConciertos.id,
-      artists: {
-        create: [
-          { artistId: maluma.id, headliner: true, order: 1 },
-          { artistId: fonseca.id, headliner: false, order: 2 },
-        ],
-      },
-    },
-  });
-
-  const e1Golden = await prisma.ticketType.create({
-    data: {
-      eventId: event1.id,
-      sectionId: sec(movArena, 'Golden Ring')?.id,
-      name: 'Golden Ring VIP',
-      description: 'Zona exclusiva frente al escenario. Incluye open bar, acceso preferencial y kit de bienvenida.',
-      price: 650000,
-      totalQuantity: 100,
-      availableQuantity: 100,
-      maxPerOrder: 4,
-    },
-  });
-  await createTickets(e1Golden.id, 100, 'GR');
-
-  const e1Floor = await prisma.ticketType.create({
-    data: {
-      eventId: event1.id,
-      sectionId: sec(movArena, 'Floor General')?.id,
-      name: 'Floor General',
-      description: 'Zona de pie con vista directa al escenario. El corazón del evento.',
-      price: 350000,
-      totalQuantity: 500,
-      availableQuantity: 500,
-      maxPerOrder: 6,
-    },
-  });
-  await createTickets(e1Floor.id, 500, 'FL');
-
-  const e1Tribuna = await prisma.ticketType.create({
-    data: {
-      eventId: event1.id,
-      sectionId: sec(movArena, 'Tribuna Norte')?.id,
-      name: 'Tribuna',
-      description: 'Sillas numeradas con excelente vista al escenario.',
-      price: 180000,
-      totalQuantity: 800,
-      availableQuantity: 800,
-      maxPerOrder: 8,
-    },
-  });
-  await createTickets(e1Tribuna.id, 800, 'TR');
-
-  console.log('✓ Evento 1 creado (Maluma)');
-
-  // EVENTO 2: Karol G - El Campín
-  const event2 = await prisma.event.create({
-    data: {
-      name: 'Karol G - Mañana Será Bonito Tour',
-      description: 'La Bichota llena el Estadio El Campín con el show más esperado del año. Un espectáculo de talla mundial que marcará historia.',
-      date: new Date('2026-11-14T20:00:00-05:00'),
-      endDate: new Date('2026-11-14T23:45:00-05:00'),
-      status: 'PUBLISHED',
+      isFeatured: true,
       venueId: elCampin.id,
-      categoryId: catConciertos.id,
-      artists: {
-        create: [
-          { artistId: karolg.id, headliner: true, order: 1 },
-          { artistId: jbalvin.id, headliner: false, order: 2 },
-        ],
-      },
+      genres: ['Reggaeton', 'Pop', 'Urbano', 'Trap'],
+      viewerCount: 847,
     },
   });
 
-  const e2Palco = await prisma.ticketType.create({
+  const c1General = await prisma.ticketType.create({
     data: {
-      eventId: event2.id,
-      sectionId: sec(elCampin, 'Palco Piso')?.id,
-      name: 'Palco Piso Platinum',
-      description: 'Zona campo premium con vista privilegiada. Incluye acceso al área de artistas.',
-      price: 850000,
-      totalQuantity: 200,
-      availableQuantity: 200,
-      maxPerOrder: 4,
-    },
-  });
-  await createTickets(e2Palco.id, 200, 'PP');
-
-  const e2OccBaja = await prisma.ticketType.create({
-    data: {
-      eventId: event2.id,
-      sectionId: sec(elCampin, 'Occidental Baja')?.id,
-      name: 'Occidental Baja',
-      description: 'Sillas numeradas en tribuna baja. Vista frontal perfecta.',
-      price: 250000,
-      totalQuantity: 600,
-      availableQuantity: 600,
-      maxPerOrder: 6,
-    },
-  });
-  await createTickets(e2OccBaja.id, 600, 'OB');
-
-  const e2Sur = await prisma.ticketType.create({
-    data: {
-      eventId: event2.id,
-      sectionId: sec(elCampin, 'Sur General')?.id,
-      name: 'Sur General',
-      description: 'Zona general sin numerar. Ambiente y vibra únicos.',
-      price: 120000,
-      totalQuantity: 500,
-      availableQuantity: 500,
-      maxPerOrder: 8,
-    },
-  });
-  await createTickets(e2Sur.id, 500, 'SG');
-
-  console.log('✓ Evento 2 creado (Karol G)');
-
-  // EVENTO 3: Colombia vs Brasil - Eliminatorias
-  const event3 = await prisma.event.create({
-    data: {
-      name: 'Colombia vs Brasil - Eliminatorias FIFA 2030',
-      description: 'La Selección Colombia recibe al gigante Brasil en partido crucial de eliminatorias camino al Mundial 2030. ¡Vístete de amarillo!',
-      date: new Date('2026-09-05T20:00:00-05:00'),
-      endDate: new Date('2026-09-05T22:00:00-05:00'),
-      status: 'PUBLISHED',
-      venueId: elCampin.id,
-      categoryId: catDeportes.id,
-    },
-  });
-
-  const e3Palco = await prisma.ticketType.create({
-    data: {
-      eventId: event3.id,
-      sectionId: sec(elCampin, 'Palco Piso')?.id,
-      name: 'Palco VIP',
-      description: 'Zona campo VIP con sillas premium y servicio personalizado.',
-      price: 450000,
-      totalQuantity: 150,
-      availableQuantity: 150,
-      maxPerOrder: 4,
-    },
-  });
-  await createTickets(e3Palco.id, 150, 'PV');
-
-  const e3OccAlta = await prisma.ticketType.create({
-    data: {
-      eventId: event3.id,
-      sectionId: sec(elCampin, 'Occidental Alta')?.id,
-      name: 'Occidental Alta',
-      description: 'Sillas numeradas tribuna alta con vista panorámica al campo.',
-      price: 180000,
-      totalQuantity: 700,
-      availableQuantity: 700,
-      maxPerOrder: 6,
-    },
-  });
-  await createTickets(e3OccAlta.id, 700, 'OA');
-
-  const e3Sur = await prisma.ticketType.create({
-    data: {
-      eventId: event3.id,
-      sectionId: sec(elCampin, 'Sur General')?.id,
-      name: 'Sur General',
-      description: 'Zona de hinchada. El ambiente más caliente del estadio.',
-      price: 80000,
-      totalQuantity: 500,
-      availableQuantity: 500,
-      maxPerOrder: 8,
-    },
-  });
-  await createTickets(e3Sur.id, 500, 'SG3');
-
-  console.log('✓ Evento 3 creado (Colombia vs Brasil)');
-
-  // EVENTO 4: Carlos Vives - Medellín
-  const event4 = await prisma.event.create({
-    data: {
-      name: 'Carlos Vives - La Tierra del Olvido 30 Años',
-      description: '30 años del álbum más icónico del vallenato moderno. Una celebración única con Carlos Vives y sus músicos originales.',
-      date: new Date('2026-08-22T19:00:00-05:00'),
-      endDate: new Date('2026-08-22T22:30:00-05:00'),
-      status: 'PUBLISHED',
-      venueId: atanasio.id,
-      categoryId: catConciertos.id,
-      artists: {
-        create: [
-          { artistId: carlosVives.id, headliner: true, order: 1 },
-          { artistId: fonseca.id, headliner: false, order: 2 },
-        ],
-      },
-    },
-  });
-
-  const e4VIP = await prisma.ticketType.create({
-    data: {
-      eventId: event4.id,
-      sectionId: sec(atanasio, 'VIP Oriental')?.id,
-      name: 'VIP Oriental',
-      description: 'Palco VIP con el mejor ángulo del show. Incluye meet & greet.',
-      price: 550000,
-      totalQuantity: 80,
-      availableQuantity: 80,
-      maxPerOrder: 4,
-    },
-  });
-  await createTickets(e4VIP.id, 80, 'VO');
-
-  const e4General = await prisma.ticketType.create({
-    data: {
-      eventId: event4.id,
-      sectionId: sec(atanasio, 'General Numerada')?.id,
-      name: 'General Numerada',
-      description: 'Sillas numeradas con excelente visibilidad.',
+      concertId: c1.id,
+      sectionId: sec(elCampin, 'General Piso')?.id,
+      name: 'General',
+      description: 'Zona general en el campo. Acceso estándar.',
       price: 220000,
-      totalQuantity: 400,
-      availableQuantity: 400,
-      maxPerOrder: 6,
-    },
-  });
-  await createTickets(e4General.id, 400, 'GN');
-
-  const e4Barra = await prisma.ticketType.create({
-    data: {
-      eventId: event4.id,
-      sectionId: sec(atanasio, 'Barra Popular')?.id,
-      name: 'Barra Popular',
-      description: 'Zona de pie. El sabor y la tradición en su máxima expresión.',
-      price: 110000,
-      totalQuantity: 300,
-      availableQuantity: 300,
+      totalQuantity: 500,
+      availableQuantity: 500,
       maxPerOrder: 8,
     },
   });
-  await createTickets(e4Barra.id, 300, 'BP');
+  await createTickets(c1General.id, 500, 'C1G');
 
-  console.log('✓ Evento 4 creado (Carlos Vives)');
-
-  // EVENTO 5: Shakira - El Campín (AGOTADO — ejemplo de waiting list)
-  const event5 = await prisma.event.create({
+  const c1VIP = await prisma.ticketType.create({
     data: {
-      name: 'Shakira - Las Mujeres Ya No Lloran World Tour',
-      description: 'La artista colombiana más exitosa de la historia regresa a Colombia en una gira mundial sin precedentes.',
-      date: new Date('2026-10-03T20:00:00-05:00'),
-      endDate: new Date('2026-10-03T23:30:00-05:00'),
-      status: 'SOLD_OUT',
-      venueId: elCampin.id,
-      categoryId: catConciertos.id,
-      artists: {
-        create: [{ artistId: shakira.id, headliner: true, order: 1 }],
-      },
+      concertId: c1.id,
+      sectionId: sec(elCampin, 'VIP Floor')?.id,
+      name: 'VIP Floor',
+      description: 'Zona VIP de pie frente al escenario con acceso preferencial.',
+      price: 480000,
+      totalQuantity: 150,
+      availableQuantity: 30,
+      maxPerOrder: 4,
     },
   });
+  await createTickets(c1VIP.id, 150, 'C1V');
+  await prisma.ticket.updateMany({
+    where: { ticketTypeId: c1VIP.id, status: 'AVAILABLE' },
+    data: { status: 'SOLD' },
+    // solo los primeros 120 se marcan vendidos para que queden 30
+  });
+  // Revertir — la lógica de "30 disponibles" ya está en availableQuantity
+  // Los tickets físicos: 150 creados, pero solo 30 son AVAILABLE
+  await prisma.ticket.updateMany({
+    where: { ticketTypeId: c1VIP.id },
+    data: { status: 'SOLD' },
+  });
+  const c1VIPAvail = await prisma.ticket.findMany({
+    where: { ticketTypeId: c1VIP.id },
+    take: 30,
+  });
+  await prisma.ticket.updateMany({
+    where: { id: { in: c1VIPAvail.map((t) => t.id) } },
+    data: { status: 'AVAILABLE' },
+  });
 
-  const e5VIP = await prisma.ticketType.create({
+  const c1Palco = await prisma.ticketType.create({
     data: {
-      eventId: event5.id,
-      sectionId: sec(elCampin, 'Palco Piso')?.id,
-      name: 'Palco Piso VIP',
-      price: 1200000,
-      totalQuantity: 200,
-      availableQuantity: 0,
+      concertId: c1.id,
+      sectionId: sec(elCampin, 'Palco Premium')?.id,
+      name: 'Palco Premium',
+      description: 'Zona exclusiva con mejor vista. Incluye lounge privado y servicio personalizado.',
+      price: 950000,
+      totalQuantity: 50,
+      availableQuantity: 3,
       maxPerOrder: 2,
     },
   });
-  await createTickets(e5VIP.id, 200, 'SVP');
-  await prisma.ticket.updateMany({ where: { ticketTypeId: e5VIP.id }, data: { status: 'SOLD' } });
+  await createTickets(c1Palco.id, 50, 'C1P');
+  await prisma.ticket.updateMany({ where: { ticketTypeId: c1Palco.id }, data: { status: 'SOLD' } });
+  const c1PalcoAvail = await prisma.ticket.findMany({ where: { ticketTypeId: c1Palco.id }, take: 3 });
+  await prisma.ticket.updateMany({
+    where: { id: { in: c1PalcoAvail.map((t) => t.id) } },
+    data: { status: 'AVAILABLE' },
+  });
 
-  const e5Floor = await prisma.ticketType.create({
+  console.log('✓ Concierto 1 creado (J Balvin - FEATURED)');
+
+  // CONCIERTO 2: Karol G - Mañana Será Bonito Tour
+  const c2 = await prisma.concert.create({
     data: {
-      eventId: event5.id,
-      sectionId: sec(elCampin, 'Occidental Baja')?.id,
-      name: 'Occidental Baja',
-      price: 550000,
-      totalQuantity: 500,
-      availableQuantity: 0,
-      maxPerOrder: 4,
+      artistId: karolg.id,
+      tourName: 'Mañana Será Bonito Tour',
+      description: 'La Bichota llega a Bogotá con el show más esperado del año. Un espectáculo visual y musical de talla mundial.',
+      date: new Date('2026-07-22T20:00:00-05:00'),
+      doorsOpenAt: new Date('2026-07-22T18:00:00-05:00'),
+      endDate: new Date('2026-07-22T23:45:00-05:00'),
+      status: 'PUBLISHED',
+      isFeatured: false,
+      venueId: movArena.id,
+      genres: ['Reggaeton', 'Trap', 'Pop'],
+      viewerCount: 312,
     },
   });
-  await createTickets(e5Floor.id, 500, 'SFL');
-  await prisma.ticket.updateMany({ where: { ticketTypeId: e5Floor.id }, data: { status: 'SOLD' } });
 
-  const e5Sur = await prisma.ticketType.create({
+  const c2General = await prisma.ticketType.create({
     data: {
-      eventId: event5.id,
-      sectionId: sec(elCampin, 'Sur General')?.id,
-      name: 'Sur General',
+      concertId: c2.id,
+      sectionId: sec(movArena, 'General')?.id,
+      name: 'General',
       price: 280000,
       totalQuantity: 600,
-      availableQuantity: 0,
-      maxPerOrder: 6,
+      availableQuantity: 600,
+      maxPerOrder: 8,
     },
   });
-  await createTickets(e5Sur.id, 600, 'SSG');
-  await prisma.ticket.updateMany({ where: { ticketTypeId: e5Sur.id }, data: { status: 'SOLD' } });
+  await createTickets(c2General.id, 600, 'C2G');
 
-  console.log('✓ Evento 5 creado (Shakira - AGOTADO)');
-
-  // EVENTO 6: Teatro - Temporada de Ópera (Teatro Metropolitano)
-  const event6 = await prisma.event.create({
+  const c2VIP = await prisma.ticketType.create({
     data: {
-      name: 'Ópera Carmen - Temporada 2026',
-      description: 'La ópera más apasionante del repertorio universal llega al Teatro Metropolitano en una producción de clase mundial.',
-      date: new Date('2026-06-12T19:30:00-05:00'),
-      endDate: new Date('2026-06-12T22:30:00-05:00'),
-      status: 'PUBLISHED',
-      venueId: teatroMet.id,
-      categoryId: catTeatro.id,
-    },
-  });
-
-  const e6Platea = await prisma.ticketType.create({
-    data: {
-      eventId: event6.id,
-      sectionId: sec(teatroMet, 'Platea Principal')?.id,
-      name: 'Platea Principal',
-      description: 'Sillas en planta baja con la mejor acústica del teatro.',
-      price: 320000,
+      concertId: c2.id,
+      sectionId: sec(movArena, 'VIP Floor')?.id,
+      name: 'VIP Floor',
+      price: 520000,
       totalQuantity: 200,
       availableQuantity: 200,
       maxPerOrder: 4,
     },
   });
-  await createTickets(e6Platea.id, 200, 'TP');
+  await createTickets(c2VIP.id, 200, 'C2V');
 
-  const e6Balcon = await prisma.ticketType.create({
+  const c2Palco = await prisma.ticketType.create({
     data: {
-      eventId: event6.id,
-      sectionId: sec(teatroMet, 'Balcón')?.id,
-      name: 'Balcón',
-      description: 'Vista panorámica desde la planta alta.',
-      price: 180000,
+      concertId: c2.id,
+      sectionId: sec(movArena, 'Palco Premium')?.id,
+      name: 'Palco Premium',
+      price: 890000,
+      totalQuantity: 60,
+      availableQuantity: 60,
+      maxPerOrder: 2,
+    },
+  });
+  await createTickets(c2Palco.id, 60, 'C2P');
+
+  console.log('✓ Concierto 2 creado (Karol G)');
+
+  // CONCIERTO 3: Maluma - Don Juan Tour
+  const c3 = await prisma.concert.create({
+    data: {
+      artistId: maluma.id,
+      tourName: 'Don Juan Tour',
+      description: 'Maluma regresa a Colombia con su Don Juan Tour. Una noche de éxitos, bailoteo y el mejor reggaeton colombiano.',
+      date: new Date('2026-08-08T21:00:00-05:00'),
+      doorsOpenAt: new Date('2026-08-08T19:00:00-05:00'),
+      endDate: new Date('2026-08-09T00:30:00-05:00'),
+      status: 'PUBLISHED',
+      isFeatured: false,
+      venueId: atanasio.id,
+      genres: ['Reggaeton', 'Pop Urbano', 'Trap'],
+      viewerCount: 203,
+    },
+  });
+
+  const c3General = await prisma.ticketType.create({
+    data: {
+      concertId: c3.id,
+      sectionId: sec(atanasio, 'General')?.id,
+      name: 'General',
+      price: 320000,
+      totalQuantity: 500,
+      availableQuantity: 500,
+      maxPerOrder: 8,
+    },
+  });
+  await createTickets(c3General.id, 500, 'C3G');
+
+  const c3Pista = await prisma.ticketType.create({
+    data: {
+      concertId: c3.id,
+      sectionId: sec(atanasio, 'Pista')?.id,
+      name: 'Pista',
+      price: 480000,
+      totalQuantity: 200,
+      availableQuantity: 200,
+      maxPerOrder: 4,
+    },
+  });
+  await createTickets(c3Pista.id, 200, 'C3P');
+
+  const c3Palco = await prisma.ticketType.create({
+    data: {
+      concertId: c3.id,
+      sectionId: sec(atanasio, 'Palco Premium')?.id,
+      name: 'Palco Premium',
+      price: 750000,
+      totalQuantity: 50,
+      availableQuantity: 50,
+      maxPerOrder: 2,
+    },
+  });
+  await createTickets(c3Palco.id, 50, 'C3L');
+
+  console.log('✓ Concierto 3 creado (Maluma)');
+
+  // CONCIERTO 4: Feid - Mar Tour Colombia 2026
+  const c4 = await prisma.concert.create({
+    data: {
+      artistId: feid.id,
+      tourName: 'Mar Tour Colombia 2026',
+      description: 'El Ferxxo desembarca en Medellín con su Mar Tour. Una experiencia musical inmersiva que fusiona reggaeton, R&B y urbano.',
+      date: new Date('2026-08-15T20:00:00-05:00'),
+      doorsOpenAt: new Date('2026-08-15T18:30:00-05:00'),
+      endDate: new Date('2026-08-15T23:00:00-05:00'),
+      status: 'PUBLISHED',
+      isFeatured: false,
+      venueId: coliseoMed.id,
+      genres: ['Reggaeton', 'Urbano', 'R&B'],
+      viewerCount: 156,
+    },
+  });
+
+  const c4Pista = await prisma.ticketType.create({
+    data: {
+      concertId: c4.id,
+      sectionId: sec(coliseoMed, 'Pista General')?.id,
+      name: 'Pista',
+      price: 200000,
+      totalQuantity: 400,
+      availableQuantity: 400,
+      maxPerOrder: 8,
+    },
+  });
+  await createTickets(c4Pista.id, 400, 'C4P');
+
+  const c4VIP = await prisma.ticketType.create({
+    data: {
+      concertId: c4.id,
+      sectionId: sec(coliseoMed, 'Pista VIP')?.id,
+      name: 'VIP',
+      price: 380000,
       totalQuantity: 150,
       availableQuantity: 150,
       maxPerOrder: 4,
     },
   });
-  await createTickets(e6Balcon.id, 150, 'TB');
+  await createTickets(c4VIP.id, 150, 'C4V');
 
-  const e6Palco = await prisma.ticketType.create({
+  console.log('✓ Concierto 4 creado (Feid)');
+
+  // CONCIERTO 5: Bad Bunny (próximo)
+  const c5 = await prisma.concert.create({
     data: {
-      eventId: event6.id,
-      sectionId: sec(teatroMet, 'Palco Lateral')?.id,
-      name: 'Palco Privado',
-      description: 'Palcos privados para grupos de hasta 4 personas con servicio exclusivo.',
-      price: 450000,
-      totalQuantity: 40,
-      availableQuantity: 40,
+      artistId: badBunny.id,
+      tourName: 'Nadie Sabe Lo Que Va a Pasar Mañana Tour',
+      description: 'El artista más escuchado del mundo llega a Colombia. Bad Bunny presenta su tour mundial con producción de nivel internacional.',
+      date: new Date('2026-09-20T20:00:00-05:00'),
+      doorsOpenAt: new Date('2026-09-20T18:00:00-05:00'),
+      endDate: new Date('2026-09-20T23:30:00-05:00'),
+      status: 'PUBLISHED',
+      isFeatured: true,
+      venueId: elCampin.id,
+      genres: ['Reggaeton', 'Trap', 'Latin Pop'],
+      viewerCount: 1247,
+    },
+  });
+
+  const c5General = await prisma.ticketType.create({
+    data: {
+      concertId: c5.id,
+      sectionId: sec(elCampin, 'General Piso')?.id,
+      name: 'General',
+      price: 350000,
+      totalQuantity: 600,
+      availableQuantity: 600,
+      maxPerOrder: 8,
+    },
+  });
+  await createTickets(c5General.id, 600, 'C5G');
+
+  const c5VIP = await prisma.ticketType.create({
+    data: {
+      concertId: c5.id,
+      sectionId: sec(elCampin, 'VIP Floor')?.id,
+      name: 'VIP Floor',
+      price: 650000,
+      totalQuantity: 200,
+      availableQuantity: 200,
       maxPerOrder: 4,
     },
   });
-  await createTickets(e6Palco.id, 40, 'TPL');
+  await createTickets(c5VIP.id, 200, 'C5V');
 
-  console.log('✓ Evento 6 creado (Ópera Carmen)');
+  const c5Palco = await prisma.ticketType.create({
+    data: {
+      concertId: c5.id,
+      sectionId: sec(elCampin, 'Palco Premium')?.id,
+      name: 'Palco Premium',
+      price: 1200000,
+      totalQuantity: 50,
+      availableQuantity: 50,
+      maxPerOrder: 2,
+    },
+  });
+  await createTickets(c5Palco.id, 50, 'C5P');
+
+  console.log('✓ Concierto 5 creado (Bad Bunny)');
+
+  // CONCIERTO 6: Shakira - AGOTADO (demo de waiting list)
+  const c6 = await prisma.concert.create({
+    data: {
+      artistId: shakira.id,
+      tourName: 'Las Mujeres Ya No Lloran World Tour',
+      description: 'La artista colombiana más exitosa de la historia regresa con su tour mundial. Un show sin precedentes que marcará la historia de Colombia.',
+      date: new Date('2026-10-10T20:00:00-05:00'),
+      doorsOpenAt: new Date('2026-10-10T18:00:00-05:00'),
+      endDate: new Date('2026-10-10T23:30:00-05:00'),
+      status: 'SOLD_OUT',
+      isFeatured: false,
+      venueId: elCampin.id,
+      genres: ['Pop', 'Rock', 'Latin'],
+      viewerCount: 4521,
+    },
+  });
+
+  const c6General = await prisma.ticketType.create({
+    data: {
+      concertId: c6.id,
+      sectionId: sec(elCampin, 'General Piso')?.id,
+      name: 'General',
+      price: 280000,
+      totalQuantity: 800,
+      availableQuantity: 0,
+      maxPerOrder: 8,
+    },
+  });
+  await createTickets(c6General.id, 800, 'C6G');
+  await prisma.ticket.updateMany({ where: { ticketTypeId: c6General.id }, data: { status: 'SOLD' } });
+
+  const c6VIP = await prisma.ticketType.create({
+    data: {
+      concertId: c6.id,
+      sectionId: sec(elCampin, 'VIP Floor')?.id,
+      name: 'VIP Floor',
+      price: 550000,
+      totalQuantity: 200,
+      availableQuantity: 0,
+      maxPerOrder: 4,
+    },
+  });
+  await createTickets(c6VIP.id, 200, 'C6V');
+  await prisma.ticket.updateMany({ where: { ticketTypeId: c6VIP.id }, data: { status: 'SOLD' } });
+
+  console.log('✓ Concierto 6 creado (Shakira - SOLD_OUT)');
+
+  // CONCIERTO 7: Karol G - Pascual Guerrero (COMPLETADO - historial)
+  const c7 = await prisma.concert.create({
+    data: {
+      artistId: karolg.id,
+      tourName: 'Mañana Será Bonito Tour',
+      description: 'Karol G en Cali. Un show histórico en el Estadio Pascual Guerrero.',
+      date: new Date('2025-04-10T19:30:00-05:00'),
+      doorsOpenAt: new Date('2025-04-10T18:00:00-05:00'),
+      status: 'COMPLETED',
+      isFeatured: false,
+      venueId: pascualGuerrero.id,
+      genres: ['Reggaeton', 'Trap', 'Pop'],
+      viewerCount: 0,
+    },
+  });
+
+  const c7VIP = await prisma.ticketType.create({
+    data: {
+      concertId: c7.id,
+      sectionId: sec(pascualGuerrero, 'VIP Floor')?.id,
+      name: 'VIP Floor',
+      price: 450000,
+      totalQuantity: 200,
+      availableQuantity: 0,
+      maxPerOrder: 4,
+    },
+  });
+  await createTickets(c7VIP.id, 200, 'C7V');
+  await prisma.ticket.updateMany({ where: { ticketTypeId: c7VIP.id }, data: { status: 'SOLD' } });
+
+  const c7General = await prisma.ticketType.create({
+    data: {
+      concertId: c7.id,
+      sectionId: sec(pascualGuerrero, 'General')?.id,
+      name: 'General',
+      price: 220000,
+      totalQuantity: 400,
+      availableQuantity: 0,
+      maxPerOrder: 8,
+    },
+  });
+  await createTickets(c7General.id, 400, 'C7G');
+  await prisma.ticket.updateMany({ where: { ticketTypeId: c7General.id }, data: { status: 'SOLD' } });
+
+  console.log('✓ Concierto 7 creado (Karol G Cali - COMPLETADO)');
 
   // ── ÓRDENES DE EJEMPLO ────────────────────────────────────────────────────
 
-  // Carlos compra 2 boletas Floor para Maluma
-  const carlosTickets = await prisma.ticket.findMany({
-    where: { ticketTypeId: e1Floor.id, status: 'AVAILABLE' },
+  // Samuel compra 2 boletas General para J Balvin
+  const samuelTickets = await prisma.ticket.findMany({
+    where: { ticketTypeId: c1General.id, status: 'AVAILABLE' },
     take: 2,
   });
-  await prisma.order.create({
+  const samuelOrder = await prisma.order.create({
     data: {
-      userId: carlos.id,
-      totalAmount: 2 * e1Floor.price,
+      userId: samuel.id,
+      subtotal: 2 * c1General.price,
+      serviceFee: 2 * c1General.price * 0.1,
+      insurance: 2 * c1General.price * 0.03,
+      totalAmount: 2 * c1General.price * 1.13,
       status: 'CONFIRMED',
+      paymentMethod: 'CARD',
       items: {
-        create: [{ ticketTypeId: e1Floor.id, quantity: 2, unitPrice: e1Floor.price }],
+        create: [{ ticketTypeId: c1General.id, quantity: 2, unitPrice: c1General.price }],
       },
-      tickets: { connect: carlosTickets.map((t) => ({ id: t.id })) },
+      tickets: { connect: samuelTickets.map((t) => ({ id: t.id })) },
     },
   });
   await prisma.ticket.updateMany({
-    where: { id: { in: carlosTickets.map((t) => t.id) } },
-    data: { status: 'SOLD' },
+    where: { id: { in: samuelTickets.map((t) => t.id) } },
+    data: { status: 'SOLD', userId: samuel.id, orderId: samuelOrder.id },
   });
   await prisma.ticketType.update({
-    where: { id: e1Floor.id },
+    where: { id: c1General.id },
     data: { availableQuantity: { decrement: 2 } },
   });
 
-  // María compra 1 Palco VIP para Colombia vs Brasil
+  // María compra 1 VIP Floor para Karol G
   const mariaTickets = await prisma.ticket.findMany({
-    where: { ticketTypeId: e3Palco.id, status: 'AVAILABLE' },
+    where: { ticketTypeId: c2VIP.id, status: 'AVAILABLE' },
     take: 1,
   });
-  await prisma.order.create({
+  const mariaOrder = await prisma.order.create({
     data: {
       userId: maria.id,
-      totalAmount: 1 * e3Palco.price,
+      subtotal: c2VIP.price,
+      serviceFee: c2VIP.price * 0.1,
+      insurance: c2VIP.price * 0.03,
+      totalAmount: c2VIP.price * 1.13,
       status: 'CONFIRMED',
+      paymentMethod: 'CARD',
       items: {
-        create: [{ ticketTypeId: e3Palco.id, quantity: 1, unitPrice: e3Palco.price }],
+        create: [{ ticketTypeId: c2VIP.id, quantity: 1, unitPrice: c2VIP.price }],
       },
       tickets: { connect: mariaTickets.map((t) => ({ id: t.id })) },
     },
   });
   await prisma.ticket.updateMany({
     where: { id: { in: mariaTickets.map((t) => t.id) } },
-    data: { status: 'SOLD' },
+    data: { status: 'SOLD', userId: maria.id, orderId: mariaOrder.id },
   });
   await prisma.ticketType.update({
-    where: { id: e3Palco.id },
+    where: { id: c2VIP.id },
     data: { availableQuantity: { decrement: 1 } },
-  });
-
-  // Pedro tiene una orden pendiente (puso en carrito, no confirmó)
-  await prisma.order.create({
-    data: {
-      userId: pedro.id,
-      totalAmount: 3 * e2Sur.price,
-      status: 'PENDING',
-      items: {
-        create: [{ ticketTypeId: e2Sur.id, quantity: 3, unitPrice: e2Sur.price }],
-      },
-    },
   });
 
   console.log('✓ Órdenes creadas');
 
-  // ── LISTA DE ESPERA ────────────────────────────────────────────────────────
+  // ── LISTA DE ESPERA (Queue en ticket.service.js) ───────────────────────────
   await prisma.waitingList.createMany({
     data: [
-      { userId: maria.id, ticketTypeId: e5Floor.id, quantity: 2, position: 1 },
-      { userId: pedro.id, ticketTypeId: e5VIP.id, quantity: 1, position: 1 },
-      { userId: carlos.id, ticketTypeId: e5Sur.id, quantity: 4, position: 1 },
+      { userId: maria.id, concertId: c6.id, ticketTypeId: c6General.id, quantity: 2, position: 1 },
+      { userId: pedro.id, concertId: c6.id, ticketTypeId: c6VIP.id, quantity: 1, position: 1 },
+      { userId: samuel.id, concertId: c6.id, ticketTypeId: c6General.id, quantity: 4, position: 2 },
     ],
   });
-  console.log('✓ Listas de espera creadas');
+  console.log('✓ Lista de espera creada');
 
   // ── RESEÑAS ───────────────────────────────────────────────────────────────
   await prisma.review.createMany({
     data: [
-      { userId: carlos.id, eventId: event1.id, rating: 5, comment: '¡Increíble show! Maluma superó todas las expectativas. La producción fue espectacular.' },
-      { userId: maria.id, eventId: event3.id, rating: 5, comment: 'El ambiente en El Campín fue indescriptible. Colombia ganó y todos lloramos de felicidad.' },
-      { userId: pedro.id, eventId: event4.id, rating: 5, comment: 'Carlos Vives en vivo es una experiencia que todo colombiano debe vivir. Magistral.' },
+      { userId: samuel.id, concertId: c7.id, rating: 5, comment: 'Karol G en Cali fue una experiencia de otro mundo. La producción, el sonido, el ambiente... todo 10/10.' },
+      { userId: maria.id, concertId: c1.id, rating: 5, comment: 'J Balvin no defrauda. El show fue espectacular, cada detalle cuidado al máximo.' },
+      { userId: pedro.id, concertId: c3.id, rating: 4, comment: 'Maluma estuvo increíble. El Atanasio lleno y una energía única.' },
     ],
   });
   console.log('✓ Reseñas creadas');
 
   // ── CARRITO DE EJEMPLO ────────────────────────────────────────────────────
-  const cartExpiry = new Date(Date.now() + 15 * 60 * 1000);
   await prisma.cart.create({
     data: {
       userId: pedro.id,
-      expiresAt: cartExpiry,
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
       items: {
         create: [
-          { ticketTypeId: e2OccBaja.id, quantity: 2 },
+          { ticketTypeId: c3General.id, quantity: 2 },
         ],
       },
     },
@@ -632,7 +763,8 @@ async function main() {
   // ── RESUMEN ───────────────────────────────────────────────────────────────
   const stats = await Promise.all([
     prisma.user.count(),
-    prisma.event.count(),
+    prisma.concert.count(),
+    prisma.artist.count(),
     prisma.ticketType.count(),
     prisma.ticket.count(),
     prisma.order.count(),
@@ -642,15 +774,17 @@ async function main() {
   console.log('  ✅  SEED COMPLETADO EXITOSAMENTE');
   console.log('═══════════════════════════════════════');
   console.log(`  Usuarios:       ${stats[0]}`);
-  console.log(`  Eventos:        ${stats[1]}`);
-  console.log(`  Tipos boleta:   ${stats[2]}`);
-  console.log(`  Boletas:        ${stats[3]}`);
-  console.log(`  Órdenes:        ${stats[4]}`);
+  console.log(`  Conciertos:     ${stats[1]}`);
+  console.log(`  Artistas:       ${stats[2]}`);
+  console.log(`  Tipos boleta:   ${stats[3]}`);
+  console.log(`  Boletas:        ${stats[4]}`);
+  console.log(`  Órdenes:        ${stats[5]}`);
   console.log('───────────────────────────────────────');
   console.log('  Credenciales de prueba:');
-  console.log('  ADMIN  → admin@ticketmaster.com / admin123');
-  console.log('  USER   → carlos@ejemplo.com     / carlos123');
-  console.log('  USER   → maria@ejemplo.com      / maria123');
+  console.log('  ADMIN  → admin@concertix.com  / admin123');
+  console.log('  USER   → samuel@ejemplo.com   / samuel123');
+  console.log('  USER   → maria@ejemplo.com    / maria123');
+  console.log('  USER   → pedro@ejemplo.com    / pedro123');
   console.log('═══════════════════════════════════════\n');
 }
 

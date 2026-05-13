@@ -1,7 +1,3 @@
-/**
- * Árbol Binario de Búsqueda — búsqueda de eventos por nombre.
- * Uso: event.service.js → search()
- */
 class BSTNode {
   constructor(key, value) {
     this.key = key;
@@ -37,7 +33,7 @@ class BST {
     return null;
   }
 
-  // Recorre el árbol y devuelve nodos cuya clave empiece con el prefijo dado
+  // busca todos los nodos cuya clave empiece con el prefijo
   searchPrefix(prefix) {
     const results = [];
     this._traversePrefix(this.root, prefix, results);

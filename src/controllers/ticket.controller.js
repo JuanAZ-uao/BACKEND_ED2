@@ -1,8 +1,8 @@
 const ticketService = require('../services/ticket.service');
 
-const getByEvent = async (req, res, next) => {
+const getByConcert = async (req, res, next) => {
   try {
-    const tickets = await ticketService.getByEvent(Number(req.params.eventId));
+    const tickets = await ticketService.getByConcert(Number(req.params.concertId));
     res.json(tickets);
   } catch (error) {
     next(error);
@@ -27,4 +27,4 @@ const cancel = async (req, res, next) => {
   }
 };
 
-module.exports = { getByEvent, reserve, cancel };
+module.exports = { getByConcert, reserve, cancel };

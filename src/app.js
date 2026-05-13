@@ -2,8 +2,10 @@ const express = require('express');
 const cors = require('cors');
 const routes = require('./routes/index');
 const errorMiddleware = require('./middlewares/error.middleware');
+const { initFirebase } = require('./config/firebase');
 
 const app = express();
+initFirebase();
 
 app.use(cors());
 app.use(express.json());

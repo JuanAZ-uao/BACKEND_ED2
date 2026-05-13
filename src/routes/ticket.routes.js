@@ -4,7 +4,7 @@ const authMiddleware = require('../middlewares/auth.middleware');
 
 const router = Router();
 
-router.get('/event/:eventId', ticketController.getByEvent);
+router.get('/concert/:concertId', ticketController.getByConcert);
 router.post('/reserve', authMiddleware, ticketController.reserve);
 router.delete('/:id/cancel', authMiddleware, ticketController.cancel);
 

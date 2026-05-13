@@ -21,18 +21,17 @@ const saveRefreshToken = async (userId, refreshToken) => {
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + 7);
 
-  // Un usuario solo tiene un refresh token activo a la vez
   await prisma.refreshToken.deleteMany({ where: { userId } });
   await prisma.refreshToken.create({ data: { token: refreshToken, userId, expiresAt } });
 };
 
-const register = async ({ name, email, password }) => {
+const register = async ({ firstName, lastName, email, password }) => {
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) throw { status: 409, message: 'El email ya está registrado' };
 
   const hashed = await bcrypt.hash(password, 10);
   const user = await prisma.user.create({
-    data: { name, email, password: hashed },
+    data: { firstName, lastName, email, password: hashed },
   });
 
   const { accessToken, refreshToken } = generateTokens(user);
@@ -57,7 +56,6 @@ const login = async ({ email, password }) => {
 const refresh = async (refreshToken) => {
   if (!refreshToken) throw { status: 401, message: 'Refresh token no proporcionado' };
 
-  // Verifica que el token sea válido criptográficamente
   let decoded;
   try {
     decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
@@ -65,7 +63,6 @@ const refresh = async (refreshToken) => {
     throw { status: 401, message: 'Refresh token inválido o expirado' };
   }
 
-  // Verifica que el token exista en BD (no haya sido revocado)
   const stored = await prisma.refreshToken.findUnique({ where: { token: refreshToken } });
   if (!stored || new Date() > stored.expiresAt) {
     throw { status: 401, message: 'Sesión expirada, inicia sesión nuevamente' };

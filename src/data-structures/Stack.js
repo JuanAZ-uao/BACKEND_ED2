@@ -1,7 +1,3 @@
-/**
- * Pila (LIFO) — historial de acciones del carrito (undo).
- * Uso: puede integrarse en el frontend o en un endpoint de historial.
- */
 class Stack {
   constructor() {
     this.items = [];

@@ -1,7 +1,3 @@
-/**
- * Cola (FIFO) — lista de espera cuando un evento se agota.
- * Uso: ticket.service.js → waitingQueues[eventId]
- */
 class Node {
   constructor(value) {
     this.value = value;

@@ -1,15 +1,16 @@
 const prisma = require('../config/prisma');
 const Queue = require('../data-structures/Queue');
+const realtimeService = require('./realtime.service');
 
-// Cola de espera en memoria por ticketTypeId (estructura de datos requerida)
+// cola de espera en memoria por ticketTypeId
 const waitingQueues = {};
 
-const getByEvent = async (eventId) => {
+const getByConcert = async (concertId) => {
   return prisma.ticketType.findMany({
-    where: { eventId },
+    where: { concertId },
     include: {
       section: true,
-      _count: { select: { tickets: true } },
+      _count: { select: { tickets: { where: { status: 'AVAILABLE' } } } },
     },
     orderBy: { price: 'asc' },
   });
@@ -18,11 +19,13 @@ const getByEvent = async (eventId) => {
 const reserve = async ({ ticketTypeId, quantity = 1 }, userId) => {
   const ticketType = await prisma.ticketType.findUnique({
     where: { id: ticketTypeId },
-    include: { event: true },
+    include: { concert: true },
   });
 
   if (!ticketType) throw { status: 404, message: 'Tipo de boleta no encontrado' };
-  if (ticketType.event.status === 'CANCELLED') throw { status: 400, message: 'El evento fue cancelado' };
+  if (ticketType.concert.status === 'CANCELLED') {
+    throw { status: 400, message: 'El concierto fue cancelado' };
+  }
   if (quantity > ticketType.maxPerOrder) {
     throw { status: 400, message: `Máximo ${ticketType.maxPerOrder} boletas por orden` };
   }
@@ -35,10 +38,19 @@ const reserve = async ({ ticketTypeId, quantity = 1 }, userId) => {
     await prisma.waitingList.upsert({
       where: { userId_ticketTypeId: { userId, ticketTypeId } },
       update: { quantity, position },
-      create: { userId, ticketTypeId, quantity, position },
+      create: {
+        userId,
+        concertId: ticketType.concertId,
+        ticketTypeId,
+        quantity,
+        position,
+      },
     });
 
-    throw { status: 409, message: `Sin disponibilidad. En lista de espera (posición ${position}).` };
+    throw {
+      status: 409,
+      message: `Sin disponibilidad. Agregado a lista de espera (posición ${position}).`,
+    };
   }
 
   const tickets = await prisma.ticket.findMany({
@@ -60,6 +72,18 @@ const reserve = async ({ ticketTypeId, quantity = 1 }, userId) => {
     data: { availableQuantity: { decrement: quantity } },
   });
 
+  // Notificar en tiempo real a otros usuarios en el mismo concierto
+  for (const ticket of tickets) {
+    if (ticket.seatLabel) {
+      realtimeService.notifySeatReserving(
+        ticketType.concertId,
+        ticket.seatLabel,
+        ticketType.name,
+        userId
+      ).catch(() => {});
+    }
+  }
+
   return tickets;
 };
 
@@ -70,7 +94,9 @@ const cancel = async (ticketId, userId) => {
   });
 
   if (!ticket) throw { status: 404, message: 'Boleta no encontrada' };
-  if (ticket.order?.userId !== userId) throw { status: 403, message: 'No tienes permiso sobre esta boleta' };
+  if (ticket.order?.userId !== userId) {
+    throw { status: 403, message: 'No tienes permiso sobre esta boleta' };
+  }
 
   await prisma.ticket.update({
     where: { id: ticketId },
@@ -89,4 +115,4 @@ const getWaitingQueue = (ticketTypeId) => {
     : [];
 };
 
-module.exports = { getByEvent, reserve, cancel, getWaitingQueue };
+module.exports = { getByConcert, reserve, cancel, getWaitingQueue };

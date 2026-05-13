@@ -1,7 +1,3 @@
-/**
- * Grafo no dirigido — relaciones entre eventos, artistas y venues.
- * Uso: puede exponerse como endpoint /api/events/:id/related
- */
 class Graph {
   constructor() {
     this.adjacencyList = new Map();
@@ -24,7 +20,7 @@ class Graph {
     return this.adjacencyList.get(vertex) || [];
   }
 
-  // BFS — encuentra eventos relacionados a N grados de separación
+  // recorre por niveles hasta maxDepth y devuelve los nodos visitados
   bfs(start, maxDepth = 2) {
     const visited = new Set();
     const result = [];
@@ -48,7 +44,7 @@ class Graph {
     return result;
   }
 
-  // DFS — recorrido profundo para encontrar cadenas de eventos
+  // recorrido en profundidad
   dfs(start) {
     const visited = new Set();
     const result = [];

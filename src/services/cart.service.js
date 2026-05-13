@@ -1,6 +1,11 @@
 const prisma = require('../config/prisma');
+const Stack = require('../data-structures/Stack');
+const realtimeService = require('./realtime.service');
 
 const CART_TTL_MS = 15 * 60 * 1000; // 15 minutos
+
+// historial de acciones del carrito por userId (Stack en memoria)
+const cartHistories = {};
 
 const getCart = async (userId) => {
   const cart = await prisma.cart.findUnique({
@@ -9,7 +14,7 @@ const getCart = async (userId) => {
       items: {
         include: {
           ticketType: {
-            include: { event: { include: { venue: true } } },
+            include: { concert: { include: { artist: true, venue: true } } },
           },
         },
       },
@@ -33,17 +38,23 @@ const getCart = async (userId) => {
 const addItem = async (userId, { ticketTypeId, quantity }) => {
   const ticketType = await prisma.ticketType.findUnique({
     where: { id: ticketTypeId },
-    include: { event: true },
+    include: { concert: true },
   });
 
   if (!ticketType) throw { status: 404, message: 'Tipo de boleta no encontrado' };
-  if (ticketType.event.status === 'CANCELLED') throw { status: 400, message: 'El evento fue cancelado' };
+  if (ticketType.concert.status === 'CANCELLED') {
+    throw { status: 400, message: 'El concierto fue cancelado' };
+  }
   if (quantity > ticketType.maxPerOrder) {
     throw { status: 400, message: `Máximo ${ticketType.maxPerOrder} boletas por orden` };
   }
   if (quantity > ticketType.availableQuantity) {
     throw { status: 400, message: 'No hay suficientes boletas disponibles' };
   }
+
+  // Registrar acción en el Stack de historial
+  if (!cartHistories[userId]) cartHistories[userId] = new Stack();
+  cartHistories[userId].push({ action: 'ADD', ticketTypeId, quantity, at: new Date() });
 
   const expiresAt = new Date(Date.now() + CART_TTL_MS);
 
@@ -59,15 +70,13 @@ const addItem = async (userId, { ticketTypeId, quantity }) => {
   });
 
   if (existing) {
-    await prisma.cartItem.update({
-      where: { id: existing.id },
-      data: { quantity },
-    });
+    await prisma.cartItem.update({ where: { id: existing.id }, data: { quantity } });
   } else {
-    await prisma.cartItem.create({
-      data: { cartId: cart.id, ticketTypeId, quantity },
-    });
+    await prisma.cartItem.create({ data: { cartId: cart.id, ticketTypeId, quantity } });
   }
+
+  // Sincronizar timer del carrito con Firebase
+  realtimeService.syncCart(userId, expiresAt).catch(() => {});
 
   return getCart(userId);
 };
@@ -76,16 +85,24 @@ const removeItem = async (userId, ticketTypeId) => {
   const cart = await prisma.cart.findUnique({ where: { userId } });
   if (!cart) throw { status: 404, message: 'Carrito no encontrado' };
 
-  await prisma.cartItem.deleteMany({
-    where: { cartId: cart.id, ticketTypeId },
-  });
+  if (cartHistories[userId]) {
+    cartHistories[userId].push({ action: 'REMOVE', ticketTypeId, at: new Date() });
+  }
+
+  await prisma.cartItem.deleteMany({ where: { cartId: cart.id, ticketTypeId } });
 
   return getCart(userId);
 };
 
 const clearCart = async (userId) => {
   await prisma.cart.deleteMany({ where: { userId } });
+  if (cartHistories[userId]) cartHistories[userId].push({ action: 'CLEAR', at: new Date() });
+  realtimeService.clearCart(userId).catch(() => {});
   return { items: [], total: 0 };
 };
 
-module.exports = { getCart, addItem, removeItem, clearCart };
+const getHistory = (userId) => {
+  return cartHistories[userId] ? cartHistories[userId].toArray() : [];
+};
+
+module.exports = { getCart, addItem, removeItem, clearCart, getHistory };

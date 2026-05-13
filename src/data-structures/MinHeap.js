@@ -1,7 +1,3 @@
-/**
- * Min-Heap — selección de asientos más baratos disponibles.
- * Uso: order.service.js → ordenar tickets por precio antes de confirmar.
- */
 class MinHeap {
   constructor() {
     this.heap = [];
