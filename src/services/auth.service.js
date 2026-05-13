@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../config/prisma');
-const { excludePassword } = require('../utils/helpers');
+const { excludePassword, toSafePositiveInt } = require('../utils/helpers');
 
 const generateTokens = (user) => {
   const payload = { id: user.id, role: user.role };
@@ -18,11 +18,12 @@ const generateTokens = (user) => {
 };
 
 const saveRefreshToken = async (userId, refreshToken) => {
+  const safeUserId = toSafePositiveInt(userId, 'userId');
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + 7);
 
-  await prisma.refreshToken.deleteMany({ where: { userId } });
-  await prisma.refreshToken.create({ data: { token: refreshToken, userId, expiresAt } });
+  await prisma.refreshToken.deleteMany({ where: { userId: safeUserId } });
+  await prisma.refreshToken.create({ data: { token: refreshToken, userId: safeUserId, expiresAt } });
 };
 
 const register = async ({ firstName, lastName, email, password }) => {
@@ -68,7 +69,8 @@ const refresh = async (refreshToken) => {
     throw { status: 401, message: 'Sesión expirada, inicia sesión nuevamente' };
   }
 
-  const user = await prisma.user.findUnique({ where: { id: decoded.id } });
+  const decodedUserId = toSafePositiveInt(decoded.id, 'userId');
+  const user = await prisma.user.findUnique({ where: { id: decodedUserId } });
   if (!user) throw { status: 401, message: 'Usuario no encontrado' };
 
   const { accessToken, refreshToken: newRefreshToken } = generateTokens(user);
@@ -78,7 +80,8 @@ const refresh = async (refreshToken) => {
 };
 
 const logout = async (userId) => {
-  await prisma.refreshToken.deleteMany({ where: { userId } });
+  const safeUserId = toSafePositiveInt(userId, 'userId');
+  await prisma.refreshToken.deleteMany({ where: { userId: safeUserId } });
 };
 
 module.exports = { register, login, refresh, logout };

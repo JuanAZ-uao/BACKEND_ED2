@@ -2,13 +2,16 @@ const prisma = require('../config/prisma');
 const MinHeap = require('../data-structures/MinHeap');
 const notificationService = require('./notification.service');
 const { sendSMS } = require('./sms.service');
+const { toSafePositiveInt } = require('../utils/helpers');
 
 const SERVICE_FEE_RATE = 0.10; // 10% cargos de servicio
 const INSURANCE_RATE = 0.03;   // 3% seguros
 
 const getByUser = async (userId) => {
+  const safeUserId = toSafePositiveInt(userId, 'userId');
+
   return prisma.order.findMany({
-    where: { userId },
+    where: { userId: safeUserId },
     include: {
       items: {
         include: {
@@ -33,8 +36,11 @@ const getByUser = async (userId) => {
 };
 
 const getById = async (id, userId) => {
+  const safeOrderId = toSafePositiveInt(id, 'orderId');
+  const safeUserId = toSafePositiveInt(userId, 'userId');
+
   const order = await prisma.order.findFirst({
-    where: { id, userId },
+    where: { id: safeOrderId, userId: safeUserId },
     include: {
       items: {
         include: {
@@ -53,6 +59,12 @@ const getById = async (id, userId) => {
 // items = [{ ticketTypeId, quantity }]
 // Las boletas deben estar previamente en estado RESERVED
 const create = async ({ items, paymentMethod = 'CARD' }, userId) => {
+  const safeUserId = toSafePositiveInt(userId, 'userId');
+
+  if (!Array.isArray(items) || items.length === 0) {
+    throw { status: 400, message: 'La orden debe incluir items' };
+  }
+
   let subtotal = 0;
   const orderItemsData = [];
   const allTicketIds = [];
@@ -61,30 +73,35 @@ const create = async ({ items, paymentMethod = 'CARD' }, userId) => {
   const heap = new MinHeap();
 
   for (const item of items) {
+    const safeTicketTypeId = toSafePositiveInt(item.ticketTypeId, 'ticketTypeId');
+    const safeQuantity = toSafePositiveInt(item.quantity, 'quantity');
+
     const ticketType = await prisma.ticketType.findUnique({
-      where: { id: item.ticketTypeId },
+      where: { id: safeTicketTypeId },
     });
-    if (!ticketType) throw { status: 404, message: `Tipo ${item.ticketTypeId} no encontrado` };
+    if (!ticketType) throw { status: 404, message: `Tipo ${safeTicketTypeId} no encontrado` };
 
     const reserved = await prisma.ticket.findMany({
-      where: { ticketTypeId: item.ticketTypeId, status: 'RESERVED' },
-      take: item.quantity,
+      where: { ticketTypeId: safeTicketTypeId, status: 'RESERVED' },
+      take: safeQuantity,
     });
 
-    if (reserved.length < item.quantity) {
+    if (reserved.length < safeQuantity) {
       throw { status: 400, message: 'Debes reservar las boletas antes de confirmar la orden' };
     }
 
-    subtotal += ticketType.price * item.quantity;
+    subtotal += ticketType.price * safeQuantity;
     heap.insert(ticketType.price);
 
     orderItemsData.push({
-      ticketTypeId: item.ticketTypeId,
-      quantity: item.quantity,
+      ticketTypeId: safeTicketTypeId,
+      quantity: safeQuantity,
       unitPrice: ticketType.price,
     });
     allTicketIds.push(...reserved.map((t) => t.id));
   }
+
+  const safeTicketIds = allTicketIds.map((id) => toSafePositiveInt(id, 'ticketId'));
 
   const serviceFee = Math.round(subtotal * SERVICE_FEE_RATE);
   const insurance = Math.round(subtotal * INSURANCE_RATE);
@@ -92,7 +109,7 @@ const create = async ({ items, paymentMethod = 'CARD' }, userId) => {
 
   const order = await prisma.order.create({
     data: {
-      userId,
+      userId: safeUserId,
       subtotal,
       serviceFee,
       insurance,
@@ -100,7 +117,7 @@ const create = async ({ items, paymentMethod = 'CARD' }, userId) => {
       status: 'CONFIRMED',
       paymentMethod,
       items: { create: orderItemsData },
-      tickets: { connect: allTicketIds.map((id) => ({ id })) },
+      tickets: { connect: safeTicketIds.map((id) => ({ id })) },
     },
     include: {
       items: {
@@ -113,14 +130,14 @@ const create = async ({ items, paymentMethod = 'CARD' }, userId) => {
   });
 
   await prisma.ticket.updateMany({
-    where: { id: { in: allTicketIds } },
-    data: { status: 'SOLD', userId },
+    where: { id: { in: safeTicketIds } },
+    data: { status: 'SOLD', userId: safeUserId },
   });
 
   // Notificación en bandeja + SMS (no bloquean la respuesta)
   Promise.resolve().then(async () => {
     try {
-      const user = await prisma.user.findUnique({ where: { id: userId } });
+      const user = await prisma.user.findUnique({ where: { id: safeUserId } });
       const firstItem = order.items[0];
       const concert = firstItem?.ticketType?.concert;
       const artist = concert?.artist;
@@ -131,7 +148,7 @@ const create = async ({ items, paymentMethod = 'CARD' }, userId) => {
       const message = `Compraste ${totalTickets} boleta${totalTickets > 1 ? 's' : ''} para ${artist.name} - ${concert.tourName}`;
 
       await notificationService.create({
-        userId,
+        userId: safeUserId,
         type: 'PURCHASE',
         title,
         message,
@@ -152,16 +169,19 @@ const create = async ({ items, paymentMethod = 'CARD' }, userId) => {
 };
 
 const cancel = async (id, userId) => {
-  const order = await prisma.order.findFirst({ where: { id, userId } });
+  const safeOrderId = toSafePositiveInt(id, 'orderId');
+  const safeUserId = toSafePositiveInt(userId, 'userId');
+
+  const order = await prisma.order.findFirst({ where: { id: safeOrderId, userId: safeUserId } });
   if (!order) throw { status: 404, message: 'Orden no encontrada' };
   if (order.status === 'CANCELLED') throw { status: 400, message: 'La orden ya fue cancelada' };
 
   await prisma.ticket.updateMany({
-    where: { orderId: id },
+    where: { orderId: safeOrderId },
     data: { status: 'CANCELLED', userId: null },
   });
 
-  const items = await prisma.orderItem.findMany({ where: { orderId: id } });
+  const items = await prisma.orderItem.findMany({ where: { orderId: safeOrderId } });
   for (const item of items) {
     await prisma.ticketType.update({
       where: { id: item.ticketTypeId },
@@ -170,7 +190,7 @@ const cancel = async (id, userId) => {
   }
 
   return prisma.order.update({
-    where: { id },
+    where: { id: safeOrderId },
     data: { status: 'CANCELLED' },
   });
 };

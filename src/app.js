@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const routes = require('./routes/index');
 const errorMiddleware = require('./middlewares/error.middleware');
 const { initFirebase } = require('./config/firebase');
@@ -8,6 +9,7 @@ const { corsOptions } = require('./config/cors');
 const app = express();
 initFirebase();
 
+app.use(helmet());
 app.use(cors(corsOptions));
 app.use(express.json());
 

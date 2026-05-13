@@ -1,12 +1,18 @@
 const prisma = require('../config/prisma');
 const BST = require('../data-structures/BST');
+const { toSafePositiveInt } = require('../utils/helpers');
 
 const eventBST = new BST();
 
 const getAll = async ({ categoryId, city, status } = {}) => {
+  const safeCategoryId =
+    categoryId === undefined || categoryId === null || categoryId === ''
+      ? null
+      : toSafePositiveInt(categoryId, 'categoryId');
+
   return prisma.event.findMany({
     where: {
-      ...(categoryId && { categoryId: Number(categoryId) }),
+      ...(safeCategoryId && { categoryId: safeCategoryId }),
       ...(city && { venue: { city } }),
       status: status || 'PUBLISHED',
     },
@@ -33,8 +39,10 @@ const search = async (query = '') => {
 };
 
 const getById = async (id) => {
+  const safeEventId = toSafePositiveInt(id, 'eventId');
+
   const event = await prisma.event.findUnique({
-    where: { id },
+    where: { id: safeEventId },
     include: {
       venue: { include: { sections: true } },
       category: true,
@@ -58,15 +66,18 @@ const create = async (data) => {
 };
 
 const update = async (id, data) => {
+  const safeEventId = toSafePositiveInt(id, 'eventId');
+
   return prisma.event.update({
-    where: { id },
+    where: { id: safeEventId },
     data,
     include: { venue: true, category: true },
   });
 };
 
 const remove = async (id) => {
-  return prisma.event.delete({ where: { id } });
+  const safeEventId = toSafePositiveInt(id, 'eventId');
+  return prisma.event.delete({ where: { id: safeEventId } });
 };
 
 module.exports = { getAll, search, getById, create, update, remove };

@@ -1,6 +1,7 @@
 const prisma = require('../config/prisma');
 const Stack = require('../data-structures/Stack');
 const realtimeService = require('./realtime.service');
+const { toSafePositiveInt } = require('../utils/helpers');
 
 const CART_TTL_MS = 15 * 60 * 1000; // 15 minutos
 
@@ -8,8 +9,10 @@ const CART_TTL_MS = 15 * 60 * 1000; // 15 minutos
 const cartHistories = {};
 
 const getCart = async (userId) => {
+  const safeUserId = toSafePositiveInt(userId, 'userId');
+
   const cart = await prisma.cart.findUnique({
-    where: { userId },
+    where: { userId: safeUserId },
     include: {
       items: {
         include: {
@@ -23,7 +26,7 @@ const getCart = async (userId) => {
 
   if (!cart) return { items: [], total: 0 };
   if (new Date() > cart.expiresAt) {
-    await prisma.cart.delete({ where: { userId } });
+    await prisma.cart.delete({ where: { userId: safeUserId } });
     return { items: [], total: 0, expired: true };
   }
 
@@ -36,8 +39,12 @@ const getCart = async (userId) => {
 };
 
 const addItem = async (userId, { ticketTypeId, quantity }) => {
+  const safeUserId = toSafePositiveInt(userId, 'userId');
+  const safeTicketTypeId = toSafePositiveInt(ticketTypeId, 'ticketTypeId');
+  const safeQuantity = toSafePositiveInt(quantity, 'quantity');
+
   const ticketType = await prisma.ticketType.findUnique({
-    where: { id: ticketTypeId },
+    where: { id: safeTicketTypeId },
     include: { concert: true },
   });
 
@@ -45,64 +52,70 @@ const addItem = async (userId, { ticketTypeId, quantity }) => {
   if (ticketType.concert.status === 'CANCELLED') {
     throw { status: 400, message: 'El concierto fue cancelado' };
   }
-  if (quantity > ticketType.maxPerOrder) {
+  if (safeQuantity > ticketType.maxPerOrder) {
     throw { status: 400, message: `Máximo ${ticketType.maxPerOrder} boletas por orden` };
   }
-  if (quantity > ticketType.availableQuantity) {
+  if (safeQuantity > ticketType.availableQuantity) {
     throw { status: 400, message: 'No hay suficientes boletas disponibles' };
   }
 
   // Registrar acción en el Stack de historial
-  if (!cartHistories[userId]) cartHistories[userId] = new Stack();
-  cartHistories[userId].push({ action: 'ADD', ticketTypeId, quantity, at: new Date() });
+  if (!cartHistories[safeUserId]) cartHistories[safeUserId] = new Stack();
+  cartHistories[safeUserId].push({ action: 'ADD', ticketTypeId: safeTicketTypeId, quantity: safeQuantity, at: new Date() });
 
   const expiresAt = new Date(Date.now() + CART_TTL_MS);
 
-  let cart = await prisma.cart.findUnique({ where: { userId } });
+  let cart = await prisma.cart.findUnique({ where: { userId: safeUserId } });
   if (!cart) {
-    cart = await prisma.cart.create({ data: { userId, expiresAt } });
+    cart = await prisma.cart.create({ data: { userId: safeUserId, expiresAt } });
   } else {
     cart = await prisma.cart.update({ where: { id: cart.id }, data: { expiresAt } });
   }
 
   const existing = await prisma.cartItem.findUnique({
-    where: { cartId_ticketTypeId: { cartId: cart.id, ticketTypeId } },
+    where: { cartId_ticketTypeId: { cartId: cart.id, ticketTypeId: safeTicketTypeId } },
   });
 
   if (existing) {
-    await prisma.cartItem.update({ where: { id: existing.id }, data: { quantity } });
+    await prisma.cartItem.update({ where: { id: existing.id }, data: { quantity: safeQuantity } });
   } else {
-    await prisma.cartItem.create({ data: { cartId: cart.id, ticketTypeId, quantity } });
+    await prisma.cartItem.create({ data: { cartId: cart.id, ticketTypeId: safeTicketTypeId, quantity: safeQuantity } });
   }
 
   // Sincronizar timer del carrito con Firebase
-  realtimeService.syncCart(userId, expiresAt).catch(() => {});
+  realtimeService.syncCart(safeUserId, expiresAt).catch(() => {});
 
-  return getCart(userId);
+  return getCart(safeUserId);
 };
 
 const removeItem = async (userId, ticketTypeId) => {
-  const cart = await prisma.cart.findUnique({ where: { userId } });
+  const safeUserId = toSafePositiveInt(userId, 'userId');
+  const safeTicketTypeId = toSafePositiveInt(ticketTypeId, 'ticketTypeId');
+
+  const cart = await prisma.cart.findUnique({ where: { userId: safeUserId } });
   if (!cart) throw { status: 404, message: 'Carrito no encontrado' };
 
-  if (cartHistories[userId]) {
-    cartHistories[userId].push({ action: 'REMOVE', ticketTypeId, at: new Date() });
+  if (cartHistories[safeUserId]) {
+    cartHistories[safeUserId].push({ action: 'REMOVE', ticketTypeId: safeTicketTypeId, at: new Date() });
   }
 
-  await prisma.cartItem.deleteMany({ where: { cartId: cart.id, ticketTypeId } });
+  await prisma.cartItem.deleteMany({ where: { cartId: cart.id, ticketTypeId: safeTicketTypeId } });
 
-  return getCart(userId);
+  return getCart(safeUserId);
 };
 
 const clearCart = async (userId) => {
-  await prisma.cart.deleteMany({ where: { userId } });
-  if (cartHistories[userId]) cartHistories[userId].push({ action: 'CLEAR', at: new Date() });
-  realtimeService.clearCart(userId).catch(() => {});
+  const safeUserId = toSafePositiveInt(userId, 'userId');
+
+  await prisma.cart.deleteMany({ where: { userId: safeUserId } });
+  if (cartHistories[safeUserId]) cartHistories[safeUserId].push({ action: 'CLEAR', at: new Date() });
+  realtimeService.clearCart(safeUserId).catch(() => {});
   return { items: [], total: 0 };
 };
 
 const getHistory = (userId) => {
-  return cartHistories[userId] ? cartHistories[userId].toArray() : [];
+  const safeUserId = toSafePositiveInt(userId, 'userId');
+  return cartHistories[safeUserId] ? cartHistories[safeUserId].toArray() : [];
 };
 
 module.exports = { getCart, addItem, removeItem, clearCart, getHistory };

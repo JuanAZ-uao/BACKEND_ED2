@@ -1,8 +1,12 @@
 const ticketService = require('../services/ticket.service');
+const { toSafePositiveInt } = require('../utils/helpers');
+
+const getSafeAuthUserId = (req) => toSafePositiveInt(req?.user?.id, 'userId');
 
 const getByConcert = async (req, res, next) => {
   try {
-    const tickets = await ticketService.getByConcert(Number(req.params.concertId));
+    const concertId = toSafePositiveInt(req.params.concertId, 'concertId');
+    const tickets = await ticketService.getByConcert(concertId);
     res.json(tickets);
   } catch (error) {
     next(error);
@@ -11,7 +15,8 @@ const getByConcert = async (req, res, next) => {
 
 const reserve = async (req, res, next) => {
   try {
-    const ticket = await ticketService.reserve(req.body, req.user.id);
+    const userId = getSafeAuthUserId(req);
+    const ticket = await ticketService.reserve(req.body, userId);
     res.status(201).json(ticket);
   } catch (error) {
     next(error);
@@ -20,7 +25,9 @@ const reserve = async (req, res, next) => {
 
 const cancel = async (req, res, next) => {
   try {
-    await ticketService.cancel(Number(req.params.id), req.user.id);
+    const ticketId = toSafePositiveInt(req.params.id, 'ticketId');
+    const userId = getSafeAuthUserId(req);
+    await ticketService.cancel(ticketId, userId);
     res.status(204).send();
   } catch (error) {
     next(error);
@@ -54,7 +61,8 @@ const getSeatMap = async (req, res, next) => {
   try {
     const { ticketTypeId } = req.query;
     if (!ticketTypeId) throw { status: 400, message: 'ticketTypeId requerido' };
-    const seats = await ticketService.getSeatMap(Number(ticketTypeId));
+    const safeTicketTypeId = toSafePositiveInt(ticketTypeId, 'ticketTypeId');
+    const seats = await ticketService.getSeatMap(safeTicketTypeId);
     res.json(seats);
   } catch (error) {
     next(error);

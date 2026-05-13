@@ -1,10 +1,14 @@
 const notificationService = require('../services/notification.service');
+const { toSafePositiveInt } = require('../utils/helpers');
+
+const getSafeAuthUserId = (req) => toSafePositiveInt(req?.user?.id, 'userId');
 
 const getAll = async (req, res, next) => {
   try {
+    const userId = getSafeAuthUserId(req);
     const [notifications, unreadCount] = await Promise.all([
-      notificationService.getByUser(req.user.id),
-      notificationService.countUnread(req.user.id),
+      notificationService.getByUser(userId),
+      notificationService.countUnread(userId),
     ]);
     res.json({ notifications, unreadCount });
   } catch (error) {
@@ -14,7 +18,9 @@ const getAll = async (req, res, next) => {
 
 const markRead = async (req, res, next) => {
   try {
-    await notificationService.markRead(Number(req.params.id), req.user.id);
+    const notificationId = toSafePositiveInt(req.params.id, 'notificationId');
+    const userId = getSafeAuthUserId(req);
+    await notificationService.markRead(notificationId, userId);
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -23,7 +29,8 @@ const markRead = async (req, res, next) => {
 
 const markAllRead = async (req, res, next) => {
   try {
-    await notificationService.markAllRead(req.user.id);
+    const userId = getSafeAuthUserId(req);
+    await notificationService.markAllRead(userId);
     res.json({ ok: true });
   } catch (error) {
     next(error);

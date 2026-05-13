@@ -1,6 +1,7 @@
 const prisma = require('../config/prisma');
 const BST = require('../data-structures/BST');
 const Graph = require('../data-structures/Graph');
+const { toSafePositiveInt } = require('../utils/helpers');
 
 const concertBST = new BST();
 
@@ -59,8 +60,10 @@ const search = async (query = '') => {
 };
 
 const getById = async (id) => {
+  const safeConcertId = toSafePositiveInt(id, 'concertId');
+
   const concert = await prisma.concert.findUnique({
-    where: { id },
+    where: { id: safeConcertId },
     include: {
       artist: true,
       venue: { include: { sections: true } },
@@ -79,6 +82,8 @@ const getById = async (id) => {
 
 // conciertos relacionados por género, venue o artista usando Graph BFS
 const getRelated = async (concertId) => {
+  const safeConcertId = toSafePositiveInt(concertId, 'concertId');
+
   const concerts = await prisma.concert.findMany({
     where: { status: 'PUBLISHED' },
     include: {
@@ -101,9 +106,9 @@ const getRelated = async (concertId) => {
     });
   });
 
-  const relatedIds = graph.bfs(concertId, 2);
+  const relatedIds = graph.bfs(safeConcertId, 2);
   return concerts
-    .filter((c) => relatedIds.includes(c.id) && c.id !== concertId)
+    .filter((c) => relatedIds.includes(c.id) && c.id !== safeConcertId)
     .slice(0, 6);
 };
 
@@ -115,15 +120,18 @@ const create = async (data) => {
 };
 
 const update = async (id, data) => {
+  const safeConcertId = toSafePositiveInt(id, 'concertId');
+
   return prisma.concert.update({
-    where: { id },
+    where: { id: safeConcertId },
     data,
     include: { artist: true, venue: true },
   });
 };
 
 const remove = async (id) => {
-  return prisma.concert.delete({ where: { id } });
+  const safeConcertId = toSafePositiveInt(id, 'concertId');
+  return prisma.concert.delete({ where: { id: safeConcertId } });
 };
 
 module.exports = { getAll, search, getById, getRelated, create, update, remove };
