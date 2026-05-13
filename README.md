@@ -132,6 +132,12 @@ npm run seed
 npm run dev
 ```
 
+6. Ejecutar pruebas (Jest):
+```bash
+npm run test:unit
+npm run test:functional
+```
+
 
 
 ---
@@ -144,3 +150,32 @@ npm run dev
 | `JWT_SECRET` | secreto para access tokens |
 | `JWT_REFRESH_SECRET` | secreto para refresh tokens |
 | `FIREBASE_DATABASE_URL` | URL de la Realtime Database de Firebase |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | JSON completo de la service account de Firebase (recomendado en Railway) |
+| `CORS_ORIGIN` | origen frontend permitido (ej: `https://tu-front.vercel.app`) |
+| `PORT` | puerto de ejecución (Railway lo inyecta automáticamente) |
+
+---
+
+## Deploy en Railway
+
+1. Conectar el repositorio de backend en Railway.
+
+2. Railway detecta `railway.toml` y ejecuta:
+```bash
+npm run start:railway
+```
+
+3. Definir variables de entorno en Railway:
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `JWT_REFRESH_SECRET`
+- `FIREBASE_DATABASE_URL`
+- `FIREBASE_SERVICE_ACCOUNT_JSON`
+- `CORS_ORIGIN` (URL del frontend en Vercel)
+
+4. Verificar salud del servicio:
+```bash
+GET /health
+```
+
+El `start:railway` ejecuta `prisma migrate deploy` antes de iniciar el servidor, por lo que las migraciones pendientes se aplican en cada despliegue.
