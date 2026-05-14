@@ -9,7 +9,14 @@ const { connectDB } = require('./config/database');
 
 const app = express();
 
-initFirebase();
+const hasFirebaseConfig =
+  Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON) &&
+  Boolean(process.env.FIREBASE_DATABASE_URL);
+
+if (hasFirebaseConfig) {
+  initFirebase();
+}
+
 connectDB().catch((err) => {
   console.error(' Error conectando a MongoDB:', err.message);
   process.exit(1);

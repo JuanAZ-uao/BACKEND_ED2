@@ -16,8 +16,8 @@ mongoose.plugin((schema) => {
 });
 
 const connectDB = async () => {
-  const uri = process.env.MONGO_URI;
-  if (!uri) throw new Error('MONGO_URI no definida en variables de entorno');
+  const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
+  if (!uri) throw new Error('Define MONGO_URI o MONGODB_URI en variables de entorno');
 
   await mongoose.connect(uri);
   console.log(' MongoDB conectado:', mongoose.connection.host);
