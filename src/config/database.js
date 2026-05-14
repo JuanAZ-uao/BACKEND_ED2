@@ -7,7 +7,11 @@ const customDnsServers = (process.env.MONGO_DNS_SERVERS || '')
   .filter(Boolean);
 
 if (customDnsServers.length > 0) {
-  dns.setServers(customDnsServers);
+  try {
+    dns.setServers(customDnsServers);
+  } catch (error) {
+    console.warn(` DNS personalizado invalido, se usara DNS por defecto: ${error.message}`);
+  }
 }
 
 const READY_STATE_LABELS = {
