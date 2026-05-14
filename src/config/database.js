@@ -44,7 +44,7 @@ const connectDB = async () => {
     return;
   }
 
-  const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
+  const uri = process.env.MONGODB_URI || process.env.MONGO_URI;
   if (!uri) throw new Error('Define MONGO_URI o MONGODB_URI en variables de entorno');
 
   const dbName = process.env.MONGO_DB_NAME || resolveDbNameFromUri(uri) || 'concertix';
