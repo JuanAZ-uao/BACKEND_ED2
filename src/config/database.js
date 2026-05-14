@@ -1,7 +1,14 @@
 const mongoose = require('mongoose');
 const dns = require('dns');
-// Usar Google DNS para resolver registros SRV de MongoDB Atlas
-dns.setServers(['8.8.8.8', '8.8.4.4']);
+// En cloud (Railway) conviene usar el DNS del runtime; solo sobreescribir si se define.
+const customDnsServers = (process.env.MONGO_DNS_SERVERS || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+
+if (customDnsServers.length > 0) {
+  dns.setServers(customDnsServers);
+}
 
 const resolveDbNameFromUri = (uri) => {
   try {

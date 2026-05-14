@@ -11,14 +11,20 @@ const parseEnvOrigins = () => {
 
 const allowedOrigins = Array.from(new Set([...DEFAULT_ALLOWED_ORIGINS, ...parseEnvOrigins()]));
 
+const isVercelPreviewOrigin = (origin) => /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin);
+
+const isOriginAllowed = (origin) =>
+  allowedOrigins.includes(origin) || isVercelPreviewOrigin(origin);
+
 const corsOptions = {
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin || isOriginAllowed(origin)) {
       callback(null, true);
       return;
     }
 
-    callback(new Error(`Origin no permitido por CORS: ${origin}`));
+    // Devuelve respuesta CORS bloqueada sin reventar el request con 500.
+    callback(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
