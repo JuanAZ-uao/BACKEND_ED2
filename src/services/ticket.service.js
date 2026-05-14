@@ -109,6 +109,61 @@ const getWaitingQueue = (ticketTypeId) => {
   return waitingQueues[ticketTypeId] ? waitingQueues[ticketTypeId].toArray() : [];
 };
 
+const verifyByCode = async (code) => {
+  const ticketCode = String(code || '').trim();
+  if (!ticketCode) throw { status: 400, message: 'Codigo de boleta requerido' };
+
+  const ticket = await Ticket.findOne({ ticketCode })
+    .populate({ path: 'userId', select: 'firstName lastName city' })
+    .populate({
+      path: 'ticketTypeId',
+      populate: {
+        path: 'concertId',
+        populate: [
+          { path: 'artistId', model: 'Artist', select: 'name' },
+          { path: 'venueId', model: 'Venue', select: 'name city' },
+        ],
+      },
+    })
+    .populate({ path: 'orderId', select: 'createdAt totalAmount' });
+
+  if (!ticket) throw { status: 404, message: 'Boleta no encontrada' };
+
+  const obj = ticket.toJSON();
+  const ticketType = obj.ticketTypeId || null;
+  const concert = ticketType?.concertId || null;
+
+  const normalized = {
+    ...obj,
+    user: obj.userId || null,
+    ticketType: ticketType
+      ? {
+          ...ticketType,
+          concert: concert
+            ? {
+                ...concert,
+                artist: concert.artistId || null,
+                venue: concert.venueId || null,
+              }
+            : null,
+          section: null,
+        }
+      : null,
+    order: obj.orderId || null,
+  };
+
+  delete normalized.userId;
+  delete normalized.ticketTypeId;
+  delete normalized.orderId;
+
+  if (normalized.ticketType?.concert) {
+    delete normalized.ticketType.concert.artistId;
+    delete normalized.ticketType.concert.venueId;
+  }
+
+  return normalized;
+};
+
 const SEAT_STATUS_PRIORITY = { SOLD: 0, USED: 0, RESERVED: 1, AVAILABLE: 2, CANCELLED: 3 };
 
 const getSeatMap = async (ticketTypeId) => {
@@ -129,4 +184,4 @@ const getSeatMap = async (ticketTypeId) => {
   return Array.from(seen.values());
 };
 
-module.exports = { getByConcert, reserve, cancel, getWaitingQueue, getSeatMap };
+module.exports = { getByConcert, reserve, cancel, getWaitingQueue, getSeatMap, verifyByCode };

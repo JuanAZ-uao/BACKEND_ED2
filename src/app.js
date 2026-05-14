@@ -46,7 +46,8 @@ app.get('/health', (req, res) => {
   const db = getDbStatus();
   const healthy = db.connected;
 
-  res.status(healthy ? 200 : 503).json({
+  // Healthcheck de Railway debe responder 200 para no marcar la app como caida.
+  res.status(200).json({
     status: healthy ? 'ok' : 'degraded',
     db,
   });

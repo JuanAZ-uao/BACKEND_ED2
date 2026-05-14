@@ -1,7 +1,7 @@
 const notificationService = require('../services/notification.service');
-const { toSafePositiveInt } = require('../utils/helpers');
+const { toSafeObjectId } = require('../utils/helpers');
 
-const getSafeAuthUserId = (req) => toSafePositiveInt(req?.user?.id, 'userId');
+const getSafeAuthUserId = (req) => toSafeObjectId(req?.user?.id, 'userId');
 
 const getAll = async (req, res, next) => {
   try {
@@ -18,7 +18,7 @@ const getAll = async (req, res, next) => {
 
 const markRead = async (req, res, next) => {
   try {
-    const notificationId = toSafePositiveInt(req.params.id, 'notificationId');
+    const notificationId = toSafeObjectId(req.params.id, 'notificationId');
     const userId = getSafeAuthUserId(req);
     await notificationService.markRead(notificationId, userId);
     res.json({ ok: true });

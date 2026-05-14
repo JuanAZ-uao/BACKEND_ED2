@@ -1,7 +1,7 @@
 const cartService = require('../services/cart.service');
-const { toSafePositiveInt } = require('../utils/helpers');
+const { toSafeObjectId } = require('../utils/helpers');
 
-const getSafeAuthUserId = (req) => toSafePositiveInt(req?.user?.id, 'userId');
+const getSafeAuthUserId = (req) => toSafeObjectId(req?.user?.id, 'userId');
 
 const getCart = async (req, res, next) => {
   try {
@@ -26,7 +26,7 @@ const addItem = async (req, res, next) => {
 const removeItem = async (req, res, next) => {
   try {
     const userId = getSafeAuthUserId(req);
-    const ticketTypeId = toSafePositiveInt(req.params.ticketTypeId, 'ticketTypeId');
+    const ticketTypeId = toSafeObjectId(req.params.ticketTypeId, 'ticketTypeId');
     const cart = await cartService.removeItem(userId, ticketTypeId);
     res.json(cart);
   } catch (error) {

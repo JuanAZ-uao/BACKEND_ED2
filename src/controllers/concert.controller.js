@@ -1,5 +1,5 @@
 const concertService = require('../services/concert.service');
-const { toSafePositiveInt } = require('../utils/helpers');
+const { toSafeObjectId } = require('../utils/helpers');
 
 const getAll = async (req, res, next) => {
   try {
@@ -22,7 +22,7 @@ const search = async (req, res, next) => {
 
 const getById = async (req, res, next) => {
   try {
-    const concertId = toSafePositiveInt(req.params.id, 'concertId');
+    const concertId = toSafeObjectId(req.params.id, 'concertId');
     const concert = await concertService.getById(concertId);
     res.json(concert);
   } catch (error) {
@@ -32,7 +32,7 @@ const getById = async (req, res, next) => {
 
 const getRelated = async (req, res, next) => {
   try {
-    const concertId = toSafePositiveInt(req.params.id, 'concertId');
+    const concertId = toSafeObjectId(req.params.id, 'concertId');
     const related = await concertService.getRelated(concertId);
     res.json(related);
   } catch (error) {
@@ -51,7 +51,7 @@ const create = async (req, res, next) => {
 
 const update = async (req, res, next) => {
   try {
-    const concertId = toSafePositiveInt(req.params.id, 'concertId');
+    const concertId = toSafeObjectId(req.params.id, 'concertId');
     const concert = await concertService.update(concertId, req.body);
     res.json(concert);
   } catch (error) {
@@ -61,7 +61,7 @@ const update = async (req, res, next) => {
 
 const remove = async (req, res, next) => {
   try {
-    const concertId = toSafePositiveInt(req.params.id, 'concertId');
+    const concertId = toSafeObjectId(req.params.id, 'concertId');
     await concertService.remove(concertId);
     res.status(204).send();
   } catch (error) {

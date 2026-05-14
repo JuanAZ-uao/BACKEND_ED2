@@ -1,7 +1,7 @@
 const orderService = require('../services/order.service');
-const { toSafePositiveInt } = require('../utils/helpers');
+const { toSafeObjectId } = require('../utils/helpers');
 
-const getSafeAuthUserId = (req) => toSafePositiveInt(req?.user?.id, 'userId');
+const getSafeAuthUserId = (req) => toSafeObjectId(req?.user?.id, 'userId');
 
 const getMyOrders = async (req, res, next) => {
   try {
@@ -16,7 +16,7 @@ const getMyOrders = async (req, res, next) => {
 const getById = async (req, res, next) => {
   try {
     const userId = getSafeAuthUserId(req);
-    const orderId = toSafePositiveInt(req.params.id, 'orderId');
+    const orderId = toSafeObjectId(req.params.id, 'orderId');
     const order = await orderService.getById(orderId, userId);
     res.json(order);
   } catch (error) {
@@ -37,7 +37,7 @@ const create = async (req, res, next) => {
 const cancel = async (req, res, next) => {
   try {
     const userId = getSafeAuthUserId(req);
-    const orderId = toSafePositiveInt(req.params.id, 'orderId');
+    const orderId = toSafeObjectId(req.params.id, 'orderId');
     const order = await orderService.cancel(orderId, userId);
     res.json(order);
   } catch (error) {
