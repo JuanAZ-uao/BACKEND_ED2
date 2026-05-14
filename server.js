@@ -6,6 +6,7 @@ const { registerCheckoutQueueSocket } = require('./src/services/checkoutQueue.se
 const { corsOptions, allowedOrigins } = require('./src/config/cors');
 
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -14,8 +15,9 @@ const io = new Server(server, {
 
 registerCheckoutQueueSocket(io);
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   console.log(`\n Concertix API corriendo en http://localhost:${PORT}`);
+  console.log(` Escuchando en ${HOST}:${PORT}`);
   console.log(` Socket de cola activo en ws://localhost:${PORT}`);
   console.log(` CORS permitido para: ${allowedOrigins.join(', ')}`);
   console.log(`\n Endpoints disponibles:`);
