@@ -6,7 +6,7 @@ const { registerCheckoutQueueSocket } = require('./src/services/checkoutQueue.se
 const { corsOptions, allowedOrigins } = require('./src/config/cors');
 
 const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = '0.0.0.0';
 
 const server = http.createServer(app);
 const io = new Server(server, {
