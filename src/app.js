@@ -5,9 +5,15 @@ const routes = require('./routes/index');
 const errorMiddleware = require('./middlewares/error.middleware');
 const { initFirebase } = require('./config/firebase');
 const { corsOptions } = require('./config/cors');
+const { connectDB } = require('./config/database');
 
 const app = express();
+
 initFirebase();
+connectDB().catch((err) => {
+  console.error(' Error conectando a MongoDB:', err.message);
+  process.exit(1);
+});
 
 app.use(helmet());
 app.use(cors(corsOptions));

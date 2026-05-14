@@ -1,55 +1,62 @@
-const prisma = require('../config/prisma');
+const { Cart, TicketType } = require('../models');
 const Stack = require('../data-structures/Stack');
 const realtimeService = require('./realtime.service');
-const { toSafePositiveInt } = require('../utils/helpers');
+const { toSafeObjectId, toSafePositiveInt } = require('../utils/helpers');
 
-const CART_TTL_MS = 15 * 60 * 1000; // 15 minutos
+const CART_TTL_MS = 15 * 60 * 1000;
 
-// historial de acciones del carrito por userId (Stack en memoria)
+// Historial de acciones del carrito por userId (Stack en memoria)
 const cartHistories = {};
 
-const getCart = async (userId) => {
-  const safeUserId = toSafePositiveInt(userId, 'userId');
+const populateCartItems = {
+  path: 'items.ticketTypeId',
+  model: 'TicketType',
+  populate: {
+    path: 'concertId',
+    model: 'Concert',
+    populate: [
+      { path: 'artistId', model: 'Artist' },
+      { path: 'venueId',  model: 'Venue' },
+    ],
+  },
+};
 
-  const cart = await prisma.cart.findUnique({
-    where: { userId: safeUserId },
-    include: {
-      items: {
-        include: {
-          ticketType: {
-            include: { concert: { include: { artist: true, venue: true } } },
-          },
-        },
-      },
-    },
-  });
-
+const formatCart = (cart) => {
   if (!cart) return { items: [], total: 0 };
+  const obj = cart.toJSON ? cart.toJSON() : cart;
+  const total = (obj.items || []).reduce((sum, i) => {
+    const price = i.ticketTypeId?.price ?? 0;
+    return sum + price * i.quantity;
+  }, 0);
+  // Normalizar nombre del campo para compatibilidad
+  obj.items = (obj.items || []).map((item) => ({
+    ...item,
+    ticketType: item.ticketTypeId,
+  }));
+  return { ...obj, total };
+};
+
+const getCart = async (userId) => {
+  const cart = await Cart.findOne({ userId }).populate(populateCartItems);
+  if (!cart) return { items: [], total: 0 };
+
   if (new Date() > cart.expiresAt) {
-    await prisma.cart.delete({ where: { userId: safeUserId } });
+    await Cart.deleteOne({ userId });
     return { items: [], total: 0, expired: true };
   }
 
-  const total = cart.items.reduce(
-    (sum, i) => sum + i.ticketType.price * i.quantity,
-    0
-  );
-
-  return { ...cart, total };
+  return formatCart(cart);
 };
 
 const addItem = async (userId, { ticketTypeId, quantity }) => {
-  const safeUserId = toSafePositiveInt(userId, 'userId');
-  const safeTicketTypeId = toSafePositiveInt(ticketTypeId, 'ticketTypeId');
-  const safeQuantity = toSafePositiveInt(quantity, 'quantity');
+  const safeTicketTypeId = toSafeObjectId(ticketTypeId, 'ticketTypeId');
+  const safeQuantity     = toSafePositiveInt(quantity, 'quantity');
 
-  const ticketType = await prisma.ticketType.findUnique({
-    where: { id: safeTicketTypeId },
-    include: { concert: true },
-  });
-
+  const ticketType = await TicketType.findById(safeTicketTypeId).populate('concertId');
   if (!ticketType) throw { status: 404, message: 'Tipo de boleta no encontrado' };
-  if (ticketType.concert.status === 'CANCELLED') {
+
+  const concert = ticketType.concertId;
+  if (concert && concert.status === 'CANCELLED') {
     throw { status: 400, message: 'El concierto fue cancelado' };
   }
   if (safeQuantity > ticketType.maxPerOrder) {
@@ -59,63 +66,60 @@ const addItem = async (userId, { ticketTypeId, quantity }) => {
     throw { status: 400, message: 'No hay suficientes boletas disponibles' };
   }
 
-  // Registrar acción en el Stack de historial
-  if (!cartHistories[safeUserId]) cartHistories[safeUserId] = new Stack();
-  cartHistories[safeUserId].push({ action: 'ADD', ticketTypeId: safeTicketTypeId, quantity: safeQuantity, at: new Date() });
+  if (!cartHistories[userId]) cartHistories[userId] = new Stack();
+  cartHistories[userId].push({ action: 'ADD', ticketTypeId: safeTicketTypeId, quantity: safeQuantity, at: new Date() });
 
   const expiresAt = new Date(Date.now() + CART_TTL_MS);
 
-  let cart = await prisma.cart.findUnique({ where: { userId: safeUserId } });
+  let cart = await Cart.findOne({ userId });
+
   if (!cart) {
-    cart = await prisma.cart.create({ data: { userId: safeUserId, expiresAt } });
+    cart = await Cart.create({
+      userId,
+      expiresAt,
+      items: [{ ticketTypeId: safeTicketTypeId, quantity: safeQuantity }],
+    });
   } else {
-    cart = await prisma.cart.update({ where: { id: cart.id }, data: { expiresAt } });
+    cart.expiresAt = expiresAt;
+    const existingItem = cart.items.find((i) => i.ticketTypeId.toString() === safeTicketTypeId);
+    if (existingItem) {
+      existingItem.quantity = safeQuantity;
+    } else {
+      cart.items.push({ ticketTypeId: safeTicketTypeId, quantity: safeQuantity });
+    }
+    await cart.save();
   }
 
-  const existing = await prisma.cartItem.findUnique({
-    where: { cartId_ticketTypeId: { cartId: cart.id, ticketTypeId: safeTicketTypeId } },
-  });
+  realtimeService.syncCart(userId, expiresAt).catch(() => {});
 
-  if (existing) {
-    await prisma.cartItem.update({ where: { id: existing.id }, data: { quantity: safeQuantity } });
-  } else {
-    await prisma.cartItem.create({ data: { cartId: cart.id, ticketTypeId: safeTicketTypeId, quantity: safeQuantity } });
-  }
-
-  // Sincronizar timer del carrito con Firebase
-  realtimeService.syncCart(safeUserId, expiresAt).catch(() => {});
-
-  return getCart(safeUserId);
+  return getCart(userId);
 };
 
 const removeItem = async (userId, ticketTypeId) => {
-  const safeUserId = toSafePositiveInt(userId, 'userId');
-  const safeTicketTypeId = toSafePositiveInt(ticketTypeId, 'ticketTypeId');
+  const safeTicketTypeId = toSafeObjectId(ticketTypeId, 'ticketTypeId');
 
-  const cart = await prisma.cart.findUnique({ where: { userId: safeUserId } });
+  const cart = await Cart.findOne({ userId });
   if (!cart) throw { status: 404, message: 'Carrito no encontrado' };
 
-  if (cartHistories[safeUserId]) {
-    cartHistories[safeUserId].push({ action: 'REMOVE', ticketTypeId: safeTicketTypeId, at: new Date() });
+  if (cartHistories[userId]) {
+    cartHistories[userId].push({ action: 'REMOVE', ticketTypeId: safeTicketTypeId, at: new Date() });
   }
 
-  await prisma.cartItem.deleteMany({ where: { cartId: cart.id, ticketTypeId: safeTicketTypeId } });
+  cart.items = cart.items.filter((i) => i.ticketTypeId.toString() !== safeTicketTypeId);
+  await cart.save();
 
-  return getCart(safeUserId);
+  return getCart(userId);
 };
 
 const clearCart = async (userId) => {
-  const safeUserId = toSafePositiveInt(userId, 'userId');
-
-  await prisma.cart.deleteMany({ where: { userId: safeUserId } });
-  if (cartHistories[safeUserId]) cartHistories[safeUserId].push({ action: 'CLEAR', at: new Date() });
-  realtimeService.clearCart(safeUserId).catch(() => {});
+  await Cart.deleteOne({ userId });
+  if (cartHistories[userId]) cartHistories[userId].push({ action: 'CLEAR', at: new Date() });
+  realtimeService.clearCart(userId).catch(() => {});
   return { items: [], total: 0 };
 };
 
 const getHistory = (userId) => {
-  const safeUserId = toSafePositiveInt(userId, 'userId');
-  return cartHistories[safeUserId] ? cartHistories[safeUserId].toArray() : [];
+  return cartHistories[userId] ? cartHistories[userId].toArray() : [];
 };
 
 module.exports = { getCart, addItem, removeItem, clearCart, getHistory };

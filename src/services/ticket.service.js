@@ -1,36 +1,38 @@
-const prisma = require('../config/prisma');
+const { Ticket, TicketType, WaitingList } = require('../models');
 const Queue = require('../data-structures/Queue');
 const realtimeService = require('./realtime.service');
-const { toSafePositiveInt } = require('../utils/helpers');
+const { toSafeObjectId, toSafePositiveInt } = require('../utils/helpers');
 
-// cola de espera en memoria por ticketTypeId
+// Cola de espera en memoria por ticketTypeId
 const waitingQueues = {};
 
 const getByConcert = async (concertId) => {
-  const safeConcertId = toSafePositiveInt(concertId, 'concertId');
+  const safeId = toSafeObjectId(concertId, 'concertId');
 
-  return prisma.ticketType.findMany({
-    where: { concertId: safeConcertId },
-    include: {
-      section: true,
-      _count: { select: { tickets: { where: { status: 'AVAILABLE' } } } },
-    },
-    orderBy: { price: 'asc' },
-  });
+  const ticketTypes = await TicketType.find({ concertId: safeId }).sort({ price: 1 });
+
+  // Añadir conteo de boletas AVAILABLE por tipo
+  const result = await Promise.all(
+    ticketTypes.map(async (tt) => {
+      const obj = tt.toJSON();
+      const availCount = await Ticket.countDocuments({ ticketTypeId: tt._id, status: 'AVAILABLE' });
+      obj._count = { tickets: availCount };
+      return obj;
+    })
+  );
+
+  return result;
 };
 
 const reserve = async ({ ticketTypeId, quantity = 1 }, userId) => {
-  const safeTicketTypeId = toSafePositiveInt(ticketTypeId, 'ticketTypeId');
-  const safeQuantity = toSafePositiveInt(quantity, 'quantity');
-  const safeUserId = toSafePositiveInt(userId, 'userId');
+  const safeTicketTypeId = toSafeObjectId(ticketTypeId, 'ticketTypeId');
+  const safeQuantity     = toSafePositiveInt(quantity, 'quantity');
 
-  const ticketType = await prisma.ticketType.findUnique({
-    where: { id: safeTicketTypeId },
-    include: { concert: true },
-  });
-
+  const ticketType = await TicketType.findById(safeTicketTypeId).populate('concertId');
   if (!ticketType) throw { status: 404, message: 'Tipo de boleta no encontrado' };
-  if (ticketType.concert.status === 'CANCELLED') {
+
+  const concert = ticketType.concertId;
+  if (concert && concert.status === 'CANCELLED') {
     throw { status: 400, message: 'El concierto fue cancelado' };
   }
   if (safeQuantity > ticketType.maxPerOrder) {
@@ -39,20 +41,18 @@ const reserve = async ({ ticketTypeId, quantity = 1 }, userId) => {
 
   if (ticketType.availableQuantity < safeQuantity) {
     if (!waitingQueues[safeTicketTypeId]) waitingQueues[safeTicketTypeId] = new Queue();
-    waitingQueues[safeTicketTypeId].enqueue({ userId: safeUserId, quantity: safeQuantity, timestamp: Date.now() });
+    waitingQueues[safeTicketTypeId].enqueue({ userId, quantity: safeQuantity, timestamp: Date.now() });
 
     const position = waitingQueues[safeTicketTypeId].size;
-    await prisma.waitingList.upsert({
-      where: { userId_ticketTypeId: { userId: safeUserId, ticketTypeId: safeTicketTypeId } },
-      update: { quantity: safeQuantity, position },
-      create: {
-        userId: safeUserId,
-        concertId: ticketType.concertId,
-        ticketTypeId: safeTicketTypeId,
+    await WaitingList.findOneAndUpdate(
+      { userId, ticketTypeId: safeTicketTypeId },
+      {
         quantity: safeQuantity,
         position,
+        concertId: ticketType.concertId?._id || ticketType.concertId,
       },
-    });
+      { upsert: true, new: true }
+    );
 
     throw {
       status: 409,
@@ -60,93 +60,70 @@ const reserve = async ({ ticketTypeId, quantity = 1 }, userId) => {
     };
   }
 
-  const tickets = await prisma.ticket.findMany({
-    where: { ticketTypeId: safeTicketTypeId, status: 'AVAILABLE' },
-    take: safeQuantity,
-  });
+  const tickets = await Ticket.find({ ticketTypeId: safeTicketTypeId, status: 'AVAILABLE' })
+    .limit(safeQuantity);
 
   if (tickets.length < safeQuantity) {
     throw { status: 409, message: 'No hay suficientes boletas disponibles' };
   }
 
-  const safeTicketIds = tickets.map((t) => toSafePositiveInt(t.id, 'ticketId'));
+  const ticketIds = tickets.map((t) => t._id);
 
-  await prisma.ticket.updateMany({
-    where: { id: { in: safeTicketIds } },
-    data: { status: 'RESERVED' },
+  await Ticket.updateMany({ _id: { $in: ticketIds } }, { status: 'RESERVED' });
+  await TicketType.findByIdAndUpdate(safeTicketTypeId, {
+    $inc: { availableQuantity: -safeQuantity },
   });
 
-  await prisma.ticketType.update({
-    where: { id: safeTicketTypeId },
-    data: { availableQuantity: { decrement: safeQuantity } },
-  });
-
-  // Notificar en tiempo real a otros usuarios en el mismo concierto
   for (const ticket of tickets) {
     if (ticket.seatLabel) {
       realtimeService.notifySeatReserving(
-        ticketType.concertId,
+        ticketType.concertId?._id?.toString() || ticketType.concertId.toString(),
         ticket.seatLabel,
         ticketType.name,
-        safeUserId
+        userId
       ).catch(() => {});
     }
   }
 
-  return tickets;
+  return tickets.map((t) => t.toJSON());
 };
 
 const cancel = async (ticketId, userId) => {
-  const safeTicketId = toSafePositiveInt(ticketId, 'ticketId');
-  const safeUserId = toSafePositiveInt(userId, 'userId');
+  const safeTicketId = toSafeObjectId(ticketId, 'ticketId');
 
-  const ticket = await prisma.ticket.findUnique({
-    where: { id: safeTicketId },
-    include: { order: true },
-  });
-
+  const ticket = await Ticket.findById(safeTicketId).populate('orderId');
   if (!ticket) throw { status: 404, message: 'Boleta no encontrada' };
-  if (ticket.order?.userId !== safeUserId) {
+
+  const order = ticket.orderId;
+  if (order && order.userId?.toString() !== userId.toString()) {
     throw { status: 403, message: 'No tienes permiso sobre esta boleta' };
   }
 
-  await prisma.ticket.update({
-    where: { id: safeTicketId },
-    data: { status: 'CANCELLED' },
-  });
-
-  await prisma.ticketType.update({
-    where: { id: ticket.ticketTypeId },
-    data: { availableQuantity: { increment: 1 } },
+  await Ticket.findByIdAndUpdate(safeTicketId, { status: 'CANCELLED' });
+  await TicketType.findByIdAndUpdate(ticket.ticketTypeId, {
+    $inc: { availableQuantity: 1 },
   });
 };
 
 const getWaitingQueue = (ticketTypeId) => {
-  const safeTicketTypeId = toSafePositiveInt(ticketTypeId, 'ticketTypeId');
-
-  return waitingQueues[safeTicketTypeId]
-    ? waitingQueues[safeTicketTypeId].toArray()
-    : [];
+  return waitingQueues[ticketTypeId] ? waitingQueues[ticketTypeId].toArray() : [];
 };
 
 const SEAT_STATUS_PRIORITY = { SOLD: 0, USED: 0, RESERVED: 1, AVAILABLE: 2, CANCELLED: 3 };
 
 const getSeatMap = async (ticketTypeId) => {
-  const safeTicketTypeId = toSafePositiveInt(ticketTypeId, 'ticketTypeId');
+  const safeId = toSafeObjectId(ticketTypeId, 'ticketTypeId');
 
-  const tickets = await prisma.ticket.findMany({
-    where: { ticketTypeId: safeTicketTypeId },
-    select: { seatLabel: true, row: true, status: true },
-    orderBy: [{ row: 'asc' }, { seatLabel: 'asc' }],
-  });
+  const tickets = await Ticket.find({ ticketTypeId: safeId })
+    .select('seatLabel row status')
+    .sort({ row: 1, seatLabel: 1 });
 
-  // Deduplicate by seatLabel — keep the most restrictive status (SOLD beats AVAILABLE)
   const seen = new Map();
   for (const t of tickets) {
     if (!t.seatLabel) continue;
     const existing = seen.get(t.seatLabel);
     if (!existing || (SEAT_STATUS_PRIORITY[t.status] ?? 99) < (SEAT_STATUS_PRIORITY[existing.status] ?? 99)) {
-      seen.set(t.seatLabel, t);
+      seen.set(t.seatLabel, t.toJSON());
     }
   }
   return Array.from(seen.values());

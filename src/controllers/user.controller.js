@@ -1,14 +1,19 @@
 const bcrypt = require('bcryptjs');
-const prisma = require('../config/prisma');
-const { excludePassword, toSafePositiveInt } = require('../utils/helpers');
+const { User, Ticket, PaymentMethod, NotificationPreference } = require('../models');
+const { excludePassword, toSafeObjectId } = require('../utils/helpers');
 const notificationService = require('../services/notification.service');
 
-const getSafeAuthUserId = (req) => toSafePositiveInt(req?.user?.id, 'userId');
+const getSafeAuthUserId = (req) => {
+  const id = req?.user?.id;
+  if (!id) throw { status: 401, message: 'Usuario no autenticado' };
+  return id;
+};
 
 const getProfile = async (req, res, next) => {
   try {
     const userId = getSafeAuthUserId(req);
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const user = await User.findById(userId);
+    if (!user) throw { status: 404, message: 'Usuario no encontrado' };
     res.json(excludePassword(user));
   } catch (error) {
     next(error);
@@ -19,20 +24,21 @@ const updateProfile = async (req, res, next) => {
   try {
     const userId = getSafeAuthUserId(req);
     const { firstName, lastName, phone, birthDate, gender, city, document, bio, avatarUrl } = req.body;
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        ...(firstName && { firstName }),
-        ...(lastName && { lastName }),
-        ...(phone !== undefined && { phone }),
-        ...(birthDate !== undefined && { birthDate: birthDate ? new Date(birthDate) : null }),
-        ...(gender !== undefined && { gender }),
-        ...(city !== undefined && { city }),
-        ...(document !== undefined && { document }),
-        ...(bio !== undefined && { bio }),
-        ...(avatarUrl !== undefined && { avatarUrl }),
-      },
-    });
+
+    const updates = {
+      ...(firstName && { firstName }),
+      ...(lastName && { lastName }),
+      ...(phone !== undefined && { phone }),
+      ...(birthDate !== undefined && { birthDate: birthDate ? new Date(birthDate) : null }),
+      ...(gender !== undefined && { gender }),
+      ...(city !== undefined && { city }),
+      ...(document !== undefined && { document }),
+      ...(bio !== undefined && { bio }),
+      ...(avatarUrl !== undefined && { avatarUrl }),
+    };
+
+    const user = await User.findByIdAndUpdate(userId, updates, { new: true });
+    if (!user) throw { status: 404, message: 'Usuario no encontrado' };
     res.json(excludePassword(user));
   } catch (error) {
     next(error);
@@ -42,20 +48,29 @@ const updateProfile = async (req, res, next) => {
 const getMyTickets = async (req, res, next) => {
   try {
     const userId = getSafeAuthUserId(req);
-    const tickets = await prisma.ticket.findMany({
-      where: { userId },
-      include: {
-        ticketType: {
-          include: {
-            concert: { include: { artist: true, venue: true } },
-            section: true,
+
+    const tickets = await Ticket.find({ userId })
+      .populate({
+        path: 'ticketTypeId',
+        populate: [
+          {
+            path: 'concertId',
+            populate: [
+              { path: 'artistId' },
+              { path: 'venueId' },
+            ],
           },
-        },
-        order: { select: { id: true, createdAt: true, totalAmount: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    res.json(tickets);
+        ],
+      })
+      .populate({ path: 'orderId', select: 'id createdAt totalAmount' })
+      .sort({ createdAt: -1 });
+
+    res.json(tickets.map((t) => {
+      const obj = t.toJSON();
+      obj.ticketType = obj.ticketTypeId;
+      obj.order = obj.orderId;
+      return obj;
+    }));
   } catch (error) {
     next(error);
   }
@@ -64,11 +79,8 @@ const getMyTickets = async (req, res, next) => {
 const getPaymentMethods = async (req, res, next) => {
   try {
     const userId = getSafeAuthUserId(req);
-    const methods = await prisma.paymentMethod.findMany({
-      where: { userId },
-      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }],
-    });
-    res.json(methods);
+    const methods = await PaymentMethod.find({ userId }).sort({ isPrimary: -1, createdAt: -1 });
+    res.json(methods.map((m) => m.toJSON()));
   } catch (error) {
     next(error);
   }
@@ -80,23 +92,18 @@ const addPaymentMethod = async (req, res, next) => {
     const { lastFour, brand, expiryMonth, expiryYear, isPrimary } = req.body;
 
     if (isPrimary) {
-      await prisma.paymentMethod.updateMany({
-        where: { userId },
-        data: { isPrimary: false },
-      });
+      await PaymentMethod.updateMany({ userId }, { isPrimary: false });
     }
 
-    const method = await prisma.paymentMethod.create({
-      data: {
-        userId,
-        lastFour,
-        brand,
-        expiryMonth,
-        expiryYear,
-        isPrimary: isPrimary || false,
-      },
+    const method = await PaymentMethod.create({
+      userId,
+      lastFour,
+      brand,
+      expiryMonth,
+      expiryYear,
+      isPrimary: isPrimary || false,
     });
-    res.status(201).json(method);
+    res.status(201).json(method.toJSON());
   } catch (error) {
     next(error);
   }
@@ -105,14 +112,12 @@ const addPaymentMethod = async (req, res, next) => {
 const deletePaymentMethod = async (req, res, next) => {
   try {
     const userId = getSafeAuthUserId(req);
-    const paymentMethodId = toSafePositiveInt(req.params.id, 'paymentMethodId');
+    const paymentMethodId = toSafeObjectId(req.params.id, 'paymentMethodId');
 
-    const method = await prisma.paymentMethod.findFirst({
-      where: { id: paymentMethodId, userId },
-    });
+    const method = await PaymentMethod.findOne({ _id: paymentMethodId, userId });
     if (!method) throw { status: 404, message: 'Método de pago no encontrado' };
 
-    await prisma.paymentMethod.delete({ where: { id: method.id } });
+    await PaymentMethod.findByIdAndDelete(paymentMethodId);
     res.status(204).send();
   } catch (error) {
     next(error);
@@ -122,15 +127,11 @@ const deletePaymentMethod = async (req, res, next) => {
 const getNotifications = async (req, res, next) => {
   try {
     const userId = getSafeAuthUserId(req);
-    let prefs = await prisma.notificationPreference.findUnique({
-      where: { userId },
-    });
+    let prefs = await NotificationPreference.findOne({ userId });
     if (!prefs) {
-      prefs = await prisma.notificationPreference.create({
-        data: { userId },
-      });
+      prefs = await NotificationPreference.create({ userId });
     }
-    res.json(prefs);
+    res.json(prefs.toJSON());
   } catch (error) {
     next(error);
   }
@@ -139,12 +140,12 @@ const getNotifications = async (req, res, next) => {
 const updateNotifications = async (req, res, next) => {
   try {
     const userId = getSafeAuthUserId(req);
-    const prefs = await prisma.notificationPreference.upsert({
-      where: { userId },
-      update: req.body,
-      create: { userId, ...req.body },
-    });
-    res.json(prefs);
+    const prefs = await NotificationPreference.findOneAndUpdate(
+      { userId },
+      { $set: req.body },
+      { upsert: true, new: true }
+    );
+    res.json(prefs.toJSON());
   } catch (error) {
     next(error);
   }
@@ -152,9 +153,7 @@ const updateNotifications = async (req, res, next) => {
 
 const getAll = async (req, res, next) => {
   try {
-    const users = await prisma.user.findMany({
-      orderBy: { createdAt: 'desc' },
-    });
+    const users = await User.find().sort({ createdAt: -1 });
     res.json(users.map(excludePassword));
   } catch (error) {
     next(error);
@@ -165,17 +164,23 @@ const changePassword = async (req, res, next) => {
   try {
     const userId = getSafeAuthUserId(req);
     const { currentPassword, newPassword } = req.body;
+
     if (!currentPassword || !newPassword) {
       return next({ status: 400, message: 'Contraseña actual y nueva son obligatorias' });
     }
     if (newPassword.length < 6) {
       return next({ status: 400, message: 'La contraseña debe tener al menos 6 caracteres' });
     }
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+
+    const user = await User.findById(userId);
+    if (!user) return next({ status: 404, message: 'Usuario no encontrado' });
+
     const valid = await bcrypt.compare(currentPassword, user.password);
     if (!valid) return next({ status: 400, message: 'La contraseña actual es incorrecta' });
+
     const hashed = await bcrypt.hash(newPassword, 10);
-    await prisma.user.update({ where: { id: userId }, data: { password: hashed } });
+    await User.findByIdAndUpdate(userId, { password: hashed });
+
     notificationService.create({
       userId,
       type: 'SECURITY',
@@ -183,6 +188,7 @@ const changePassword = async (req, res, next) => {
       message: 'Tu contraseña fue cambiada exitosamente. Si no fuiste tú, contacta soporte.',
       link: '/profile',
     }).catch(() => {});
+
     res.json({ message: 'Contraseña actualizada correctamente' });
   } catch (error) {
     next(error);

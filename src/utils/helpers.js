@@ -1,5 +1,10 @@
+const mongoose = require('mongoose');
+
 const excludePassword = (user) => {
-  const { password, ...rest } = user;
+  if (!user) return null;
+  // Funciona con documentos Mongoose y objetos planos
+  const obj = typeof user.toJSON === 'function' ? user.toJSON() : user;
+  const { password, ...rest } = obj;
   return rest;
 };
 
@@ -12,6 +17,14 @@ const formatDate = (date) =>
 
 const formatPrice = (amount) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP' }).format(amount);
+
+// Valida que un valor sea un ObjectId válido de MongoDB
+const toSafeObjectId = (value, fieldName = 'id') => {
+  if (!value || !mongoose.Types.ObjectId.isValid(String(value))) {
+    throw { status: 400, message: `${fieldName} inválido` };
+  }
+  return String(value);
+};
 
 const toSafeInt = (value, fieldName = 'valor') => {
   if (typeof value === 'number' && Number.isInteger(value)) return value;
@@ -33,6 +46,7 @@ module.exports = {
   excludePassword,
   formatDate,
   formatPrice,
+  toSafeObjectId,
   toSafeInt,
   toSafePositiveInt,
 };

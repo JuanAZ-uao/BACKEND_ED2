@@ -1,0 +1,17 @@
+module.exports = {
+  User:                   require('./User'),
+  RefreshToken:           require('./RefreshToken'),
+  Venue:                  require('./Venue'),
+  Artist:                 require('./Artist'),
+  Concert:                require('./Concert'),
+  TicketType:             require('./TicketType'),
+  Ticket:                 require('./Ticket'),
+  Order:                  require('./Order'),
+  Cart:                   require('./Cart'),
+  WaitingList:            require('./WaitingList'),
+  Review:                 require('./Review'),
+  PaymentMethod:          require('./PaymentMethod'),
+  NotificationPreference: require('./NotificationPreference'),
+  Notification:           require('./Notification'),
+  Event:                  require('./Event'),
+};

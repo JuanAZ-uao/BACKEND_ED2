@@ -1,47 +1,41 @@
-const prisma = require('../config/prisma');
-const { toSafePositiveInt } = require('../utils/helpers');
+const { Notification } = require('../models');
+const { toSafeObjectId, toSafePositiveInt } = require('../utils/helpers');
 
 const create = async ({ userId, type, title, message, link = null }) => {
-  const safeUserId = toSafePositiveInt(userId, 'userId');
-
-  return prisma.notification.create({
-    data: { userId: safeUserId, type, title, message, link },
-  });
+  const notification = await Notification.create({ userId, type, title, message, link });
+  return notification.toJSON();
 };
 
 const getByUser = async (userId, limit = 30) => {
-  const safeUserId = toSafePositiveInt(userId, 'userId');
   const safeLimit = toSafePositiveInt(limit, 'limit');
 
-  return prisma.notification.findMany({
-    where: { userId: safeUserId },
-    orderBy: { createdAt: 'desc' },
-    take: safeLimit,
-  });
+  const notifications = await Notification.find({ userId })
+    .sort({ createdAt: -1 })
+    .limit(safeLimit);
+
+  return notifications.map((n) => n.toJSON());
 };
 
 const markRead = async (id, userId) => {
-  const safeId = toSafePositiveInt(id, 'id');
-  const safeUserId = toSafePositiveInt(userId, 'userId');
+  const safeId = toSafeObjectId(id, 'id');
 
-  return prisma.notification.updateMany({
-    where: { id: safeId, userId: safeUserId },
-    data: { read: true },
-  });
+  const result = await Notification.updateMany(
+    { _id: safeId, userId },
+    { read: true }
+  );
+  return result;
 };
 
 const markAllRead = async (userId) => {
-  const safeUserId = toSafePositiveInt(userId, 'userId');
-
-  return prisma.notification.updateMany({
-    where: { userId: safeUserId, read: false },
-    data: { read: true },
-  });
+  const result = await Notification.updateMany(
+    { userId, read: false },
+    { read: true }
+  );
+  return result;
 };
 
 const countUnread = async (userId) => {
-  const safeUserId = toSafePositiveInt(userId, 'userId');
-  return prisma.notification.count({ where: { userId: safeUserId, read: false } });
+  return Notification.countDocuments({ userId, read: false });
 };
 
 module.exports = { create, getByUser, markRead, markAllRead, countUnread };
