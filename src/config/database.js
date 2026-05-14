@@ -3,6 +3,16 @@ const dns = require('dns');
 // Usar Google DNS para resolver registros SRV de MongoDB Atlas
 dns.setServers(['8.8.8.8', '8.8.4.4']);
 
+const resolveDbNameFromUri = (uri) => {
+  try {
+    const parsed = new URL(uri);
+    const pathname = (parsed.pathname || '').replace(/^\/+/, '');
+    return pathname || null;
+  } catch {
+    return null;
+  }
+};
+
 // Plugin global: convierte _id → id y elimina __v en todas las respuestas
 mongoose.plugin((schema) => {
   const transform = (doc, ret) => {
@@ -19,8 +29,10 @@ const connectDB = async () => {
   const uri = process.env.MONGO_URI || process.env.MONGODB_URI;
   if (!uri) throw new Error('Define MONGO_URI o MONGODB_URI en variables de entorno');
 
-  await mongoose.connect(uri);
-  console.log(' MongoDB conectado:', mongoose.connection.host);
+  const dbName = process.env.MONGO_DB_NAME || resolveDbNameFromUri(uri) || 'concertix';
+
+  await mongoose.connect(uri, { dbName });
+  console.log(` MongoDB conectado: ${mongoose.connection.host} (db: ${dbName})`);
 };
 
 module.exports = { connectDB };
